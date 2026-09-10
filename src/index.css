@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: #e7ddc4;
+    color: theme('colors.ink');
+    font-family: theme('fontFamily.sans');
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* 頁面切換動畫（對照原型 .screen 的 fade + slide） */
+.screen-enter {
+  animation: screen-in 0.32s ease both;
+}
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 3px solid rgba(140, 100, 16, 0.25);
+  border-top-color: #8c6410;
+  animation: spin 0.9s linear infinite;
+}
+
+/* Leaflet 自訂 marker（對照原型 .map-pin） */
+.map-pin {
+  width: 30px;
+  height: 30px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 700;
+  font-size: 12px;
+  border: 2px solid #fff;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
+}
+.map-pin span {
+  transform: rotate(45deg);
+  display: block;
+}
+.map-pin-user {
+  background: #0e5c53;
+}
+.map-pin-stop {
+  background: #ff210c;
+}
+.leaflet-popup-content {
+  font-family: 'Manrope', sans-serif;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.leaflet-popup-content strong {
+  font-family: 'Fraunces', serif;
+  font-size: 13.5px;
+}
+.leaflet-control-attribution {
+  font-size: 9px !important;
+}
