@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { BottomBar, Button, ScreenScroll, TopBar } from '../components/ui';
-import { MOCK_GPS } from '../data/mock';
+import { createPlace } from '../lib/api';
 import { useApp } from '../state/AppState';
-import type { Place } from '../types';
 
 type NavState = { imageDataUrl?: string; fileName?: string };
 
@@ -20,6 +19,8 @@ export default function Upload2() {
   const state = (useLocation().state ?? {}) as NavState;
 
   const [phase, setPhase] = useState<'idle' | 'processing' | 'done'>('idle');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   // AI 擷取的示範結果（spec 2.4：前端只顯示可編輯的最終結果，不呈現 OCR 中間畫面）
   const [form, setForm] = useState({
     region: '台南市中西區',
@@ -38,22 +39,27 @@ export default function Upload2() {
     setTimeout(() => setPhase('done'), 900);
   };
 
-  const save = () => {
-    // spec 第 4 節：正式版座標由 geocoding 產生，這裡用目前位置附近隨機點 mock
-    const jitter = () => (Math.random() - 0.5) * 0.03;
-    const place: Place = {
-      id: `u${Date.now()}`,
-      name: form.name.trim() || '未命名地點',
-      region: form.region.trim(),
-      category: form.category.trim() || '未分類',
-      source: `${form.source.trim() || '截圖上傳'} 截圖`,
-      lat: MOCK_GPS.lat + jitter(),
-      lng: MOCK_GPS.lng + jitter(),
-      visited: false,
-      imageDataUrl: state.imageDataUrl,
-    };
-    dispatch({ type: 'addPlace', place });
-    navigate('/places');
+  const save = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const place = await createPlace({
+        storeName: form.name.trim() || '未命名地點',
+        region: form.region.trim(),
+        category: form.category.trim() || '未分類',
+        source: form.source.trim() || '截圖上傳',
+        // 截圖 base64 之後接 VLM／圖床再一起處理（spec 第 4 節 imageUrl 欄位）
+      });
+      dispatch({
+        type: 'addPlace',
+        // 保留本次上傳的預覽圖，讓導回清單後仍看得到縮圖
+        place: { ...place, imageDataUrl: state.imageDataUrl ?? place.imageDataUrl },
+      });
+      navigate('/places');
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : '儲存失敗，請再試一次');
+      setSaving(false);
+    }
   };
 
   return (
@@ -114,8 +120,13 @@ export default function Upload2() {
         )}
       </ScreenScroll>
       <BottomBar>
+        {saveError && (
+          <p className="text-center text-[12px] text-red-deep">{saveError}</p>
+        )}
         {phase === 'done' ? (
-          <Button onClick={save}>儲存到「想去的地方」</Button>
+          <Button onClick={() => void save()} disabled={saving}>
+            {saving ? '儲存中…' : '儲存到「想去的地方」'}
+          </Button>
         ) : (
           <Button
             variant="teal"

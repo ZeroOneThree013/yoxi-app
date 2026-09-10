@@ -7,10 +7,13 @@
 - **PWA**：vite-plugin-pwa（manifest + service worker，可加到主畫面）
 - **樣式**：Tailwind CSS，色彩／字體照 spec 第 5 節設成 theme（`tailwind.config.js`）
 - **地圖**：Leaflet + OpenStreetMap 圖磚 + OSRM demo（路線畫面），失敗時 fallback 直線
-- **資料**：全部是 mock（`src/data/mock.ts`），尚未接任何後端
+- **資料**：
+  - **「想去的地方」已接後端**：Google Apps Script + Google Sheets（`src/lib/api.ts`、`gas/`）
+  - 其餘功能仍是 mock（`src/data/mock.ts`）
 
-> 這一版**沒有**串接 Google Apps Script。之後照 spec 第 4 節的表格逐項換成真實串接
-> （建議順序：帳號系統 → 收藏地點資料庫 → 地圖／路徑規劃 → VLM/OCR → 叫車／訂位）。
+> 後端網址還沒填時，「想去的地方」會自動退回本機 mock（重整會重置），畫面不會壞。
+> 設定方式見 `gas/README.md` 與 `src/config.ts`。
+> 其餘照 spec 第 4 節的表格逐項換：帳號系統 → 地圖／路徑規劃 → VLM/OCR → 叫車／訂位。
 
 ## 開發
 
@@ -44,9 +47,20 @@ npm run preview  # 本機預覽 build 結果
 
 ## 狀態管理
 
-`src/state/AppState.tsx`：`useReducer` + Context，並把 profile／quiz／places／dailyTask
-輕量寫入 `localStorage`（`yoxi.appstate.v1`），重整不會掉資料。流程暫存（勾選、路線、確認頁）
-不持久化。
+`src/state/AppState.tsx`：`useReducer` + Context。
+
+- `profile`／`quiz`／`dailyTask` 輕量寫入 `localStorage`（`yoxi.appstate.v1`），重整不掉。
+- `places`（收藏地點）由後端提供：App 載入時 + 進「想去的地方」頁時各抓一次
+  （`refreshPlaces()`），有 loading／空清單／錯誤三種狀態；不寫 `localStorage`。
+- 流程暫存（勾選的地點、規劃路線、確認頁）不持久化。
+
+## 後端串接（想去的地方）
+
+- API 層：`src/lib/api.ts`（`fetchPlaces` / `createPlace`）
+- 設定：`src/config.ts` 的 `API_BASE_URL`（或環境變數 `VITE_API_BASE_URL`）
+- 後端程式與部署步驟：`gas/Code.gs`、`gas/README.md`
+- Google Sheets 分頁 `Places`，欄位：`id / userId / storeName / region / category / source / imageUrl / createdAt / visited`
+- POST 用 `Content-Type: text/plain` 避開 CORS preflight（spec 6.2）
 
 ## 部署到 GitHub Pages
 

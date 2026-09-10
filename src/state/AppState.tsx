@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -7,12 +8,8 @@ import {
   type Dispatch,
   type ReactNode,
 } from 'react';
-import {
-  DEFAULT_PROFILE,
-  DEFAULT_QUIZ,
-  MOCK_DAILY_TASK,
-  MOCK_PLACES,
-} from '../data/mock';
+import { DEFAULT_PROFILE, DEFAULT_QUIZ, MOCK_DAILY_TASK } from '../data/mock';
+import { fetchPlaces } from '../lib/api';
 import type {
   Confirmation,
   DailyTask,
@@ -22,16 +19,19 @@ import type {
   QuizAnswer,
 } from '../types';
 
+type PlacesStatus = 'idle' | 'loading' | 'ready' | 'error';
+
 interface State {
   profile: Profile;
   quiz: QuizAnswer;
+  /** 收藏地點：由後端（GAS + Sheets）提供，不再持久化到 localStorage */
   places: Place[];
+  placesStatus: PlacesStatus;
+  placesError: string | null;
   dailyTask: DailyTask;
-  /** 目前在「選擇任務地點」畫面勾選的 id（可跨 saved / rec） */
+  /** 在「選擇任務地點」畫面勾選的 id（可跨 saved / rec） */
   selectedPlaceIds: string[];
-  /** AI 規劃後的路線，供 route / confirm 畫面使用 */
   route: PlannedRoute | null;
-  /** 確認頁內容 */
   confirmation: Confirmation | null;
 }
 
@@ -40,6 +40,9 @@ type Action =
   | { type: 'completeOnboarding' }
   | { type: 'setQuiz'; patch: Partial<QuizAnswer> }
   | { type: 'submitQuiz'; answer: Omit<QuizAnswer, 'answeredAt'> }
+  | { type: 'placesLoading' }
+  | { type: 'placesLoaded'; places: Place[] }
+  | { type: 'placesError'; message: string }
   | { type: 'addPlace'; place: Place }
   | { type: 'toggleSelected'; id: string }
   | { type: 'clearSelected' }
@@ -53,7 +56,9 @@ const STORAGE_KEY = 'yoxi.appstate.v1';
 const initialState: State = {
   profile: DEFAULT_PROFILE,
   quiz: DEFAULT_QUIZ,
-  places: MOCK_PLACES,
+  places: [],
+  placesStatus: 'idle',
+  placesError: null,
   dailyTask: MOCK_DAILY_TASK,
   selectedPlaceIds: [],
   route: null,
@@ -68,7 +73,10 @@ function load(): State {
     return {
       ...initialState,
       ...saved,
-      // 這幾項是流程中的暫存，不從 storage 還原
+      // 這些是後端資料或流程暫存，不從 storage 還原
+      places: [],
+      placesStatus: 'idle',
+      placesError: null,
       selectedPlaceIds: [],
       route: null,
       confirmation: null,
@@ -91,7 +99,30 @@ function reducer(state: State, action: Action): State {
         ...state,
         quiz: { ...action.answer, answeredAt: new Date().toISOString() },
       };
+    case 'placesLoading':
+      return { ...state, placesStatus: 'loading', placesError: null };
+    case 'placesLoaded': {
+      // 保留本次 session 上傳過的預覽圖（後端目前不存 base64）
+      const localImages = new Map(
+        state.places
+          .filter((p) => p.imageDataUrl)
+          .map((p) => [p.id, p.imageDataUrl] as const),
+      );
+      return {
+        ...state,
+        places: action.places.map((p) =>
+          localImages.has(p.id)
+            ? { ...p, imageDataUrl: localImages.get(p.id) }
+            : p,
+        ),
+        placesStatus: 'ready',
+        placesError: null,
+      };
+    }
+    case 'placesError':
+      return { ...state, placesStatus: 'error', placesError: action.message };
     case 'addPlace':
+      // 樂觀更新：先塞進清單，回清單畫面時會再向後端拉一次覆蓋
       return { ...state, places: [action.place, ...state.places] };
     case 'toggleSelected': {
       const has = state.selectedPlaceIds.includes(action.id);
@@ -111,7 +142,7 @@ function reducer(state: State, action: Action): State {
     case 'completeDailyTask':
       return { ...state, dailyTask: { ...state.dailyTask, status: 'done' } };
     case 'reset':
-      return { ...initialState, places: MOCK_PLACES };
+      return initialState;
     default:
       return state;
   }
@@ -119,6 +150,8 @@ function reducer(state: State, action: Action): State {
 
 interface Ctx extends State {
   dispatch: Dispatch<Action>;
+  /** 向後端重新抓收藏地點清單 */
+  refreshPlaces: () => Promise<void>;
 }
 
 const AppStateContext = createContext<Ctx | null>(null);
@@ -128,17 +161,38 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      const { profile, quiz, places, dailyTask } = state;
+      const { profile, quiz, dailyTask } = state;
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ profile, quiz, places, dailyTask }),
+        JSON.stringify({ profile, quiz, dailyTask }),
       );
     } catch {
       /* localStorage 不可用時略過（隱私視窗等） */
     }
   }, [state]);
 
-  const value = useMemo<Ctx>(() => ({ ...state, dispatch }), [state]);
+  const refreshPlaces = useCallback(async () => {
+    dispatch({ type: 'placesLoading' });
+    try {
+      const places = await fetchPlaces();
+      dispatch({ type: 'placesLoaded', places });
+    } catch (e) {
+      dispatch({
+        type: 'placesError',
+        message: e instanceof Error ? e.message : '讀取收藏地點失敗',
+      });
+    }
+  }, []);
+
+  // App 一載入就先抓一次，首頁的收藏數等才會正確
+  useEffect(() => {
+    void refreshPlaces();
+  }, [refreshPlaces]);
+
+  const value = useMemo<Ctx>(
+    () => ({ ...state, dispatch, refreshPlaces }),
+    [state, refreshPlaces],
+  );
   return (
     <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>
   );
