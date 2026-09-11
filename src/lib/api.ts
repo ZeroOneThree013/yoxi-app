@@ -187,7 +187,7 @@ export async function recognizePlace(
         mimeType,
       }),
     },
-    25000, // Gemini 呼叫比較久，逾時拉長一點
+    40000, // 後端遇到 503 會重試最多 3 次（見 gas/Code.gs），逾時要拉長一點
   );
   const json = await parseJson<ApiResponse<RecognizedPlace>>(res);
   if (!json.success) throw new Error(json.message || '辨識失敗，請手動填寫');

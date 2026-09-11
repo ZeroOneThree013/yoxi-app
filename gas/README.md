@@ -88,13 +88,17 @@ const DEPLOYED_API_URL = 'https://script.google.com/macros/s/AKfycb....../exec';
 
 ## 6. 關於 Gemini 截圖辨識與額度
 
-- 用的是 Google AI Studio 申請的**免費額度**金鑰，多模態模型（目前是 `gemini-2.0-flash`，
+- 用的是 Google AI Studio 申請的**免費額度**金鑰，多模態模型（目前是 `gemini-3.6-flash`，
   設定在 `Code.gs` 的 `GEMINI_MODEL` 常數，之後模型停用要換名稱改這裡就好）。
 - 免費額度有**請求次數限制**（每分鐘 / 每天）。如果辨識開始常常失敗、
   或看到「Gemini API 額度已用完或請求過於頻繁（HTTP 429）」，
   去 [Google AI Studio](https://aistudio.google.com/app/apikey) 或
   Google Cloud Console 的用量頁面確認額度用完了沒。
-- 辨識失敗（額度用完、Gemini 抽風回不出乾淨 JSON、圖片太大等）一律回
+- 免費層偶爾會回 **503**（暫時性過載）：後端遇到 503 或連線逾時會自動重試
+  （等 0.6s、再等 1.5s，共嘗試 3 次），成功就直接回結果，不用你手動重刷；
+  都失敗才回錯誤（訊息會附上「已重試 2 次」）。重試延遲設定在 `Code.gs` 的
+  `RECOGNIZE_RETRY_DELAYS_MS`。
+- 辨識失敗（額度用完、重試 3 次都 503、Gemini 抽風回不出乾淨 JSON、圖片太大等）一律回
   `{"success":false, "message":"..."}`，前端會讓欄位留白給使用者手動填寫，
   **不會卡住整個上傳流程**——這是設計上的 fallback，不是要修的 bug。
 - 送出去的截圖前端已經先壓縮（最長邊 ≤ 1280px），後端也有一層大小防呆
@@ -126,6 +130,7 @@ const DEPLOYED_API_URL = 'https://script.google.com/macros/s/AKfycb....../exec';
 | `缺少必要欄位：userId` | 正常的錯誤訊息（直接開 `/exec` 沒帶 `?userId=` 就會這樣） |
 | 寫入成功但清單沒更新 | 前端會在回到清單時重新抓；若還是沒有，確認 Sheet 有多一列、`userId` 欄是 `demo-user` |
 | 辨識一直回「後端尚未設定 GEMINI_API_KEY」 | 見第 3 節設定指令碼屬性；設定完不用重新部署，即時生效 |
-| 辨識一直回「Gemini API 額度已用完...（HTTP 429）」 | 免費額度用完或太頻繁，去 AI Studio 確認額度，或稍後再試 |
+| 辨識一直回「Gemini API 額度已用完...（HTTP 429）」 | 免費額度用完或太頻繁，去 AI Studio 確認額度，或稍後再試（429 不會自動重試，重刷沒用要等） |
+| 辨識回「Gemini API 回應異常（已重試 2 次）（HTTP 503）」 | 免費層過載，連重試 3 次都沒排到；通常是短暫的，晚一點再上傳一次同一張截圖即可 |
 | 辨識一直回「辨識失敗，請手動填寫」 | 通常是 Gemini 沒回乾淨 JSON（已有防呆解析仍失敗），或圖片內容真的看不出地點；手動填寫即可，不影響儲存 |
 | 改了 `Code.gs` 但辨識行為沒變 | 忘記重新部署，見第 8 節「Manage deployments → New version」 |

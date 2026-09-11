@@ -30,6 +30,8 @@
  *     設定方式見 gas/README.md。
  *   - 用的是 Google AI Studio 申請的免費額度金鑰，有請求次數限制（RPM / RPD）。
  *     如果辨識常常回「Gemini API 額度已用完」，去 Google AI Studio 的用量頁面確認額度。
+ *   - 免費層偶爾會回 503（暫時性過載）：遇到 503 或連線逾時會自動重試
+ *     （見 RECOGNIZE_RETRY_DELAYS_MS、fetchGeminiWithRetry_），都失敗才回錯誤。
  */
 
 const SHEET_NAME = 'Places';
@@ -60,6 +62,9 @@ const GEMINI_API_URL =
 // base64 字串長度上限（約 6MB 原始檔案）：避免 GAS 執行時間 / Gemini 請求大小限制炸掉。
 // 前端上傳時已經先壓縮過，這裡是後端這邊的防呆，不是唯一防線。
 const RECOGNIZE_IMAGE_MAX_LEN = 8000000;
+// 免費層偶爾會 503（暫時性過載）或連線逾時，遇到就等一下重試，不用整個當掉。
+// 陣列長度 = 重試次數，值 = 該次重試前要等多久（毫秒）。
+const RECOGNIZE_RETRY_DELAYS_MS = [600, 1500];
 
 const RECOGNIZE_PROMPT = [
   '你是一個從社群媒體或地圖 App 的手機截圖中擷取地點資訊的助理。',
@@ -307,6 +312,35 @@ function handleCreatePlace_(body) {
 
 /* ─────────────── 截圖辨識（Gemini API） ─────────────── */
 
+/**
+ * 呼叫 Gemini，遇到 503（暫時性過載）或連線層級的錯誤（逾時等）就照
+ * RECOGNIZE_RETRY_DELAYS_MS 等一下再試，同一個 model、同一份 payload。
+ * 其他狀態碼（例如 200、429、400）第一次就直接回傳，不重試。
+ * 回傳 { res } 表示有拿到 HTTP 回應（呼叫端自己判斷 status code）；
+ * 回傳 { fetchError } 表示重試用盡、連線層級一直失敗。
+ */
+function fetchGeminiWithRetry_(url, options) {
+  const maxAttempts = RECOGNIZE_RETRY_DELAYS_MS.length + 1;
+  let lastFetchError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > 1) {
+      Utilities.sleep(RECOGNIZE_RETRY_DELAYS_MS[attempt - 2]);
+    }
+    try {
+      const res = UrlFetchApp.fetch(url, options);
+      if (res.getResponseCode() === 503 && attempt < maxAttempts) {
+        continue; // 暫時性過載，再試一次
+      }
+      return { res: res };
+    } catch (fetchErr) {
+      lastFetchError = fetchErr;
+      // 連線層級的錯誤（非 HTTP 狀態碼）也算暫時性，一樣重試
+    }
+  }
+  return { fetchError: lastFetchError };
+}
+
 function handleRecognizePlace_(body) {
   try {
     const imageBase64 = body.imageBase64 ? String(body.imageBase64) : '';
@@ -341,23 +375,25 @@ function handleRecognizePlace_(body) {
       },
     };
 
-    let res;
-    try {
-      res = UrlFetchApp.fetch(
-        GEMINI_API_URL + '?key=' + encodeURIComponent(apiKey),
-        {
-          method: 'post',
-          contentType: 'application/json',
-          payload: JSON.stringify(payload),
-          muteHttpExceptions: true,
-        },
-      );
-    } catch (fetchErr) {
+    const attempt = fetchGeminiWithRetry_(
+      GEMINI_API_URL + '?key=' + encodeURIComponent(apiKey),
+      {
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify(payload),
+        muteHttpExceptions: true,
+      },
+    );
+    if (!attempt.res) {
+      const fetchErr = attempt.fetchError;
       return jsonError_(
-        '呼叫 Gemini API 失敗：' +
+        '呼叫 Gemini API 失敗（已重試 ' +
+          RECOGNIZE_RETRY_DELAYS_MS.length +
+          ' 次）：' +
           (fetchErr && fetchErr.message ? fetchErr.message : fetchErr),
       );
     }
+    const res = attempt.res;
 
     const code = res.getResponseCode();
     const text = res.getContentText();
@@ -369,8 +405,9 @@ function handleRecognizePlace_(body) {
       );
     }
     if (code < 200 || code >= 300) {
+      const retried = code === 503 ? '（已重試 ' + RECOGNIZE_RETRY_DELAYS_MS.length + ' 次）' : '';
       return jsonError_(
-        'Gemini API 回應異常（HTTP ' + code + '）：' + text.slice(0, 300),
+        'Gemini API 回應異常' + retried + '（HTTP ' + code + '）：' + text.slice(0, 300),
       );
     }
 
