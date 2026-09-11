@@ -19,7 +19,10 @@ export interface PlaceRecord {
   category: string;
   source: string;
   imageUrl: string;
-  /** 預留欄位，目前後端一律回 null（還沒有座標來源） */
+  /**
+   * 截圖辨識（Gemini）順便估算的大概座標；沒估算出來（或沒走辨識）就是 null。
+   * 不是精確 GPS，是依店名／地區文字的世界知識估算，見 gas/README.md。
+   */
   lat: number | null;
   lng: number | null;
   createdAt: string;
@@ -32,8 +35,11 @@ export interface NewPlaceInput {
   region: string;
   category: string;
   source: string;
-  /** 截圖 base64；base64 圖片之後接 VLM／圖床再一起處理，目前多半留空 */
+  /** 截圖 base64；base64 圖片之後接圖床再一起處理，目前多半留空 */
   imageUrl?: string;
+  /** 辨識結果的估算座標，背景帶過去存檔用，使用者不會編輯這兩個值 */
+  lat?: number | null;
+  lng?: number | null;
 }
 
 /** 截圖辨識結果（Gemini 回傳，對應 spec 2.4 的辨識欄位） */
@@ -42,6 +48,9 @@ export interface RecognizedPlace {
   region: string;
   category: string;
   source: string;
+  /** Gemini 依世界知識估算的大概座標；認不出來就是 null，不要硬湊 */
+  lat: number | null;
+  lng: number | null;
 }
 
 type ApiResponse<T> =
@@ -52,8 +61,8 @@ const isConfigured = () => API_BASE_URL.length > 0;
 
 /**
  * 後端 record → 前端 Place。
- * lat / lng 直接帶後端的值（目前一律 null）。路線地圖需要座標時，
- * 由 lib/route.ts 的 placeCoord() 在沒有實值時回傳假座標（已知下一步工作）。
+ * lat / lng 直接帶後端的值（有辨識估算就有值，沒有就 null）。路線地圖需要座標時，
+ * 由 lib/route.ts 的 placeCoord() 優先用這裡的實值，沒有才回傳假座標 fallback。
  */
 function toPlace(r: PlaceRecord): Place {
   return {
@@ -140,8 +149,8 @@ export async function createPlace(
       category: input.category,
       source: input.source,
       imageUrl: input.imageUrl ?? '',
-      lat: null,
-      lng: null,
+      lat: input.lat ?? null,
+      lng: input.lng ?? null,
       createdAt: new Date().toISOString(),
       visited: false,
     });

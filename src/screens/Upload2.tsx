@@ -14,6 +14,10 @@ const FIELDS = [
 ] as const;
 
 const EMPTY_FORM = { region: '', name: '', category: '', source: '' };
+const EMPTY_COORDS: { lat: number | null; lng: number | null } = {
+  lat: null,
+  lng: null,
+};
 
 export default function Upload2() {
   const navigate = useNavigate();
@@ -26,6 +30,8 @@ export default function Upload2() {
   const [recognizeError, setRecognizeError] = useState<string | null>(null);
   // 前端只顯示可編輯的最終結果，不呈現辨識過程的中間畫面（spec 2.4）
   const [form, setForm] = useState(EMPTY_FORM);
+  // 辨識順便估算的座標：背景帶去存檔用，不給使用者看／編輯（spec 這次的需求）
+  const [coords, setCoords] = useState(EMPTY_COORDS);
 
   // 直接進到這頁但沒有帶圖片時，回上一步
   if (!state.imageDataUrl && phase === 'idle') {
@@ -44,10 +50,12 @@ export default function Upload2() {
         category: result.category || '未分類',
         source: result.source || '截圖上傳',
       });
+      setCoords({ lat: result.lat, lng: result.lng });
     } catch (e) {
       // Fallback：Gemini 額度用完／服務不穩／辨識不出來都會走到這裡。
       // 欄位留白讓使用者手動填寫，不能卡住整個流程。
       setForm(EMPTY_FORM);
+      setCoords(EMPTY_COORDS);
       setRecognizeError(e instanceof Error ? e.message : '辨識失敗，請手動填寫');
     } finally {
       setPhase('done');
@@ -64,6 +72,9 @@ export default function Upload2() {
         category: form.category.trim() || '未分類',
         source: form.source.trim() || '截圖上傳',
         // 截圖 base64 之後接圖床再一起處理（spec 第 4 節 imageUrl 欄位）
+        // 辨識順便估算的大概座標，背景帶過去，使用者不用看到這兩個數字
+        lat: coords.lat,
+        lng: coords.lng,
       });
       dispatch({
         type: 'addPlace',

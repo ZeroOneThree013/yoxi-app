@@ -21,8 +21,10 @@
  *
  * 欄位（Places 分頁）：
  *   id / userId / storeName / region / category / source / imageUrl / lat / lng / createdAt / visited
- *   - lat / lng 是「預留欄位」：目前沒有座標來源，前端不會送、後端一律存空值、
- *     doGet 讀出來是 null。之後接「截圖辨識取得座標」或「地區文字 geocoding」才會真的填。
+ *   - lat / lng：截圖辨識（Gemini）時會順便估算大概座標，有估算出來就存進這兩欄；
+ *     Gemini 沒把握、或使用者直接手動填寫（沒走辨識）時留空，doGet 讀出來是 null。
+ *     這是 Gemini 依世界知識估算的「大概位置」，不是精確 GPS，也沒有接真正的
+ *     geocoding 服務——準確度依地點知名度而定，見 gas/README.md。
  *   - 舊的 Places 分頁如果沒有這兩欄，第一次讀 / 寫時會自動補上標題（見 ensureHeaders_）。
  *
  * 截圖辨識（Gemini API）：
@@ -76,8 +78,14 @@ const RECOGNIZE_PROMPT = [
   '  "storeName": "店名，看不出來就填空字串",',
   '  "region": "地區，格式例如「台南市中西區」；只看得出城市就填城市；完全看不出來就填空字串",',
   '  "category": "地點種類的簡短分類，例如「咖啡廳」「餐廳」「選物 / 逛街」「戶外 / 走走」；看不出來就填「未分類」",',
-  '  "source": "只能是「Instagram」「Facebook」「Google Maps」其中之一，依畫面上的 UI 特徵判斷；判斷不出來就填「截圖上傳」"',
+  '  "source": "只能是「Instagram」「Facebook」「Google Maps」其中之一，依畫面上的 UI 特徵判斷；判斷不出來就填「截圖上傳」",',
+  '  "lat": 緯度數字或 null,',
+  '  "lng": 經度數字或 null',
   '}',
+  '',
+  'lat / lng 請依你自己對這個店名與地區的世界知識，估算這個地點大概的座標（WGS84）。',
+  '這兩個欄位一定要是 JSON 數字或 JSON null，不要用字串、不要加引號。',
+  '如果你認不出具體是哪個地點、沒有把握給出合理估算，兩個都填 null，不要硬湊或亂猜一個數字。',
 ].join('\n');
 
 /* ─────────────── 試算表 / sheet ─────────────── */
@@ -424,11 +432,15 @@ function handleRecognizePlace_(body) {
     const parsed = extractJsonObject_(replyText);
     if (!parsed) return jsonError_('辨識失敗，請手動填寫');
 
+    const latLng = sanitizeLatLng_(parsed.lat, parsed.lng);
+
     return jsonOk_({
       storeName: parsed.storeName ? String(parsed.storeName).trim() : '',
       region: parsed.region ? String(parsed.region).trim() : '',
       category: parsed.category ? String(parsed.category).trim() : '',
       source: normalizeSource_(parsed.source),
+      lat: latLng.lat,
+      lng: latLng.lng,
     });
   } catch (err) {
     return jsonError_('辨識失敗：' + (err && err.message ? err.message : err));
@@ -481,6 +493,21 @@ function normalizeSource_(v) {
   const s = v ? String(v).trim() : '';
   if (s === 'Instagram' || s === 'Facebook' || s === 'Google Maps') return s;
   return '截圖上傳';
+}
+
+/**
+ * Gemini 估算的 lat / lng 防呆：兩個都要是合理範圍內的數字才算數。
+ * 缺一個、型別不對、或超出經緯度合理範圍，就兩個都當作沒有（null），
+ * 不要讓半吊子或亂猜的座標混進 Places 表。
+ */
+function sanitizeLatLng_(latRaw, lngRaw) {
+  const lat = numOrNull_(latRaw);
+  const lng = numOrNull_(lngRaw);
+  if (lat === null || lng === null) return { lat: null, lng: null };
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return { lat: null, lng: null };
+  }
+  return { lat: lat, lng: lng };
 }
 
 function testAuth() {

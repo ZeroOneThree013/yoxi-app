@@ -14,8 +14,10 @@
   - **截圖辨識已接 Gemini API**（多模態，取代原本假資料）：上傳截圖 → 前端壓縮
     （`src/lib/image.ts`）→ 後端呼叫 Gemini 辨識 → 回可編輯欄位；辨識失敗（額度用完／
     服務不穩）會讓欄位留白給使用者手動填寫，不卡住流程
-  - 其餘功能仍是 mock（`src/data/mock.ts`）；各收藏地點的 lat/lng 欄位已加好但值還是空的，
-    路線規劃畫面的地點座標暫時仍用假資料（`src/lib/route.ts` 的 `placeCoord`）
+  - **地點座標已接上**：辨識時 Gemini 會依世界知識順便估算大概座標存進 `lat`/`lng`
+    （不是精確 GPS，沒接真正 geocoding）；路線規劃畫面優先用這個實值，沒有才 fallback
+    回原型假座標（`src/lib/route.ts` 的 `placeCoord`）
+  - 其餘功能仍是 mock（`src/data/mock.ts`）
 
 > 後端網址還沒填時，「想去的地方」會自動退回本機 mock（重整會重置）；
 > Gemini 金鑰還沒設定時，辨識會直接顯示「請手動填寫」，畫面都不會壞。
@@ -68,7 +70,7 @@ npm run preview  # 本機預覽 build 結果
 - 後端程式與部署步驟：`gas/Code.gs`、`gas/README.md`
 - Google Sheets 分頁 `Places`，欄位：
   `id / userId / storeName / region / category / source / imageUrl / lat / lng / createdAt / visited`
-  （`lat` / `lng` 是預留欄位，見 `gas/README.md`）
+  （`lat` / `lng` 是辨識時 Gemini 順便估算的大概座標，見 `gas/README.md`）
 - POST 用 `Content-Type: text/plain` 避開 CORS preflight（spec 6.2）
 - 截圖辨識：`doPost` body 帶 `action: 'recognizePlace'` 時改呼叫 Gemini API
   （金鑰放 GAS 的 Script Properties，不寫死在程式碼），其餘 `doPost` 走新增地點邏輯

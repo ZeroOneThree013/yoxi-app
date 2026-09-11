@@ -25,10 +25,10 @@ interface RawStop {
 /**
  * 取地點座標給「路線地圖 / 距離計算」用。
  *
- * ⚠️ 已知下一步工作：Places sheet 已經有 lat / lng 欄位，但目前實際值都是空的
- *   （還沒有座標來源）。所以這裡在沒有真實座標時，暫時沿用原型的假座標
- *   ——依 id 把地點打散在「目前位置」附近。之後接「截圖辨識取得座標」或
- *   「依地區文字做 geocoding」再改成用真實值，屆時就會走上面那個 return。
+ * 優先用地點自己存的 lat / lng（截圖辨識時 Gemini 依世界知識估算的大概座標，
+ * 見 gas/Code.gs handleRecognizePlace_ 與 gas/README.md）。
+ * 沒有實值時（Gemini 沒把握、或地點是手動輸入沒走辨識）才 fallback 回原型的
+ * 假座標——依 id 把地點打散在「目前位置」附近，純粹讓地圖不要空白，不是真的位置。
  */
 export function placeCoord(place: {
   id: string;

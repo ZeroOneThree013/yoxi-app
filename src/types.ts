@@ -26,10 +26,11 @@ export interface Place {
   /** 來源：Instagram / Facebook / Google Maps 截圖 */
   source: string;
   /**
-   * 經緯度。Places sheet 已有這兩個欄位，但目前沒有座標來源，實際多半是 null。
-   * ⚠️ 已知下一步：路線規劃畫面的地點座標暫時仍沿用原型假資料
-   *   （見 lib/route.ts 的 placeCoord），等接「截圖辨識取得座標」或
-   *   「地區文字 geocoding」再填實值。這次不在任何畫面直接使用／顯示。
+   * 經緯度。截圖辨識（Gemini）時會順便依世界知識估算大概座標；Gemini 沒把握、
+   * 或地點是手動輸入沒走辨識，就是 null——不是精確 GPS，也沒接真正的 geocoding
+   * 服務，準確度依地點知名度而定（見 gas/README.md）。
+   * 路線規劃畫面用 lib/route.ts 的 placeCoord() 取用：有實值就用，沒有才 fallback
+   * 回原型假座標。這兩個值不在任何畫面直接顯示／編輯。
    */
   lat?: number | null;
   lng?: number | null;

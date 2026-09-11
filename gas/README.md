@@ -2,7 +2,8 @@
 
 `Code.gs` 的內容自己貼到 Apps Script 編輯器手動部署。以下是步驟。
 
-> 已經部署過的人：`Code.gs` 這次新增了「截圖辨識」功能（呼叫 Gemini API）。
+> 已經部署過的人：`Code.gs` 這次新增了「截圖辨識」功能（呼叫 Gemini API），
+> 辨識結果現在也會**順便估算地點座標**存進 `lat` / `lng`（見第 7 節）。
 > 把新版內容貼回 Apps Script 編輯器覆蓋舊的 `Code.gs`，做第 3 節設定 API 金鑰，
 > 再照第 8 節「Manage deployments → New version → Deploy」重新部署（網址不變，
 > 前端 `src/config.ts` 不用改）。
@@ -85,6 +86,9 @@ const DEPLOYED_API_URL = 'https://script.google.com/macros/s/AKfycb....../exec';
   回到清單看得到新項目，且 Google Sheet 的 `Places` 分頁多一列。
 - **辨識**：走到「開始 AI 辨識」那步，應該幾秒內回真的辨識結果（不是固定的示範資料）；
   改變截圖內容，辨識出的店名／地區/種類也應該跟著變。
+- **座標**：辨識一個知名地點（例如連鎖咖啡店、知名景點）並儲存後，
+  去 Google Sheet 的 `Places` 分頁看那一列的 `lat` / `lng`，應該有數字（不是空的）；
+  辨識不出具體地點的截圖，這兩欄留空是正常的。
 
 ## 6. 關於 Gemini 截圖辨識與額度
 
@@ -106,15 +110,20 @@ const DEPLOYED_API_URL = 'https://script.google.com/macros/s/AKfycb....../exec';
 
 ## 7. 關於 lat / lng 欄位
 
-`lat` / `lng` 目前是**預留欄位**：
+`lat` / `lng` 現在會在**截圖辨識時順便填**：
 
-- 前端這次**不會**送座標值（還沒有座標來源）。
-- 後端收到沒帶 `lat` / `lng` 就存成空儲存格；`doGet` 讀出來會是 `null`。
-- 實際的座標值要等之後接這類功能才會真的填入：
-  - 「截圖辨識（VLM）時順便取得座標」，或
-  - 「依 `region` 地區文字做地理編碼（geocoding）」
-- 在那之前，`Places` 分頁裡新增的地點 `lat` / `lng` 一律是空的；
-  前端路線規劃畫面的地點座標暫時仍沿用原型假資料（見 `src/lib/route.ts` 的 `placeCoord`）。
+- Gemini 辨識截圖的同時，會依它自己對店名／地區的世界知識估算一個大概座標，
+  跟著 `storeName` / `region` / `category` / `source` 一起回傳。
+- 前端存檔時會把這兩個值背景帶進去（使用者看不到、不用編輯），
+  後端收到就存進 `Places` 分頁既有的 `lat` / `lng` 欄位。
+- **這是「大概位置」，不是精確 GPS，也沒有接真正的 geocoding 服務**：
+  - 準確度依 Gemini 對這個地點的熟悉程度而定——知名地標（連鎖店、觀光景點）通常
+    抓得比較準，小眾 / 新開的店家可能誤差較大，或 Gemini 沒把握直接回 `null`。
+  - Gemini 沒把握、地點是使用者手動輸入（沒走辨識）、或辨識當次失敗，
+    `lat` / `lng` 就是空值；`doGet` 讀出來是 `null`。
+- 路線規劃畫面（`src/lib/route.ts` 的 `placeCoord`）會優先用地點自己的 `lat` / `lng`；
+  真的沒有實值時才 fallback 回原型的假座標，地圖不會因此空白或壞掉。
+- 之後如果要更準，可以再接真正的地理編碼（geocoding）服務校正，這次先不做。
 
 ## 8. 之後改 Code.gs 怎麼重新部署
 
