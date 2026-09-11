@@ -3,8 +3,10 @@
 `Code.gs` 的內容自己貼到 Apps Script 編輯器手動部署。以下是步驟。
 
 > 已經部署過的人：`Code.gs` 這次新增了「截圖辨識」功能（呼叫 Gemini API），
-> 辨識結果現在也會**順便估算地點座標**存進 `lat` / `lng`（見第 7 節）。
-> 把新版內容貼回 Apps Script 編輯器覆蓋舊的 `Code.gs`，做第 3 節設定 API 金鑰，
+> 辨識結果現在也會**順便估算地點座標**存進 `lat` / `lng`，新增地點時後端還會
+> 額外查一次 **Nominatim 地理編碼**修正座標（見第 7 節）——不用另外申請金鑰，
+> Nominatim 是免費、不用註冊的服務。
+> 把新版內容貼回 Apps Script 編輯器覆蓋舊的 `Code.gs`，做第 3 節設定 Gemini 金鑰，
 > 再照第 8 節「Manage deployments → New version → Deploy」重新部署（網址不變，
 > 前端 `src/config.ts` 不用改）。
 
@@ -89,6 +91,10 @@ const DEPLOYED_API_URL = 'https://script.google.com/macros/s/AKfycb....../exec';
 - **座標**：辨識一個知名地點（例如連鎖咖啡店、知名景點）並儲存後，
   去 Google Sheet 的 `Places` 分頁看那一列的 `lat` / `lng`，應該有數字（不是空的）；
   辨識不出具體地點的截圖，這兩欄留空是正常的。
+- **精確查詢有沒有生效**：同一列的 `coordSource` 欄位——`geocoded` 表示這筆座標是
+  Nominatim 精確查到的，`estimated` 是退回 Gemini 估算，空字串是兩個都沒查到。
+  也可以到 Apps Script 編輯器左側 **執行項目 (Executions)** 看最近一次 `doPost` 的
+  執行紀錄（Logs），會有 `Nominatim 查到座標...` 或 `Nominatim 查無結果...` 的訊息。
 
 ## 6. 關於 Gemini 截圖辨識與額度
 
@@ -108,22 +114,45 @@ const DEPLOYED_API_URL = 'https://script.google.com/macros/s/AKfycb....../exec';
 - 送出去的截圖前端已經先壓縮（最長邊 ≤ 1280px），後端也有一層大小防呆
   （`RECOGNIZE_IMAGE_MAX_LEN`），避免 GAS 執行時間或 Gemini 請求大小限制炸掉。
 
-## 7. 關於 lat / lng 欄位
+## 7. 關於 lat / lng 欄位：Nominatim 精確查詢 + Gemini 估算
 
-`lat` / `lng` 現在會在**截圖辨識時順便填**：
+新增地點時，`handleCreatePlace_` 依序決定座標：
 
-- Gemini 辨識截圖的同時，會依它自己對店名／地區的世界知識估算一個大概座標，
-  跟著 `storeName` / `region` / `category` / `source` 一起回傳。
-- 前端存檔時會把這兩個值背景帶進去（使用者看不到、不用編輯），
-  後端收到就存進 `Places` 分頁既有的 `lat` / `lng` 欄位。
-- **這是「大概位置」，不是精確 GPS，也沒有接真正的 geocoding 服務**：
-  - 準確度依 Gemini 對這個地點的熟悉程度而定——知名地標（連鎖店、觀光景點）通常
-    抓得比較準，小眾 / 新開的店家可能誤差較大，或 Gemini 沒把握直接回 `null`。
-  - Gemini 沒把握、地點是使用者手動輸入（沒走辨識）、或辨識當次失敗，
-    `lat` / `lng` 就是空值；`doGet` 讀出來是 `null`。
+1. **Nominatim 地理編碼查詢（精確）**：用「店名 + 地區」查
+   [Nominatim](https://nominatim.openstreetmap.org/)（OpenStreetMap 的免費地理編碼服務），
+   查到就用這組座標，**覆蓋掉**下一項的 Gemini 估算值。
+2. **Gemini 估算（大概）**：截圖辨識時 Gemini 依世界知識估算的座標，前端存檔時背景帶過去
+   （使用者看不到、不用編輯）。只有 Nominatim 查無結果時才會用這組。
+3. **都沒有**：兩個都沒查到 / 沒估算出來，`lat` / `lng` 留空，`doGet` 讀出來是 `null`。
+
+哪一筆是精確查詢、哪一筆是估算，存在 `coordSource` 欄位（`geocoded` / `estimated` / 空字串），
+**這是內部除錯用的註記，不給使用者看**，也不會出現在任何畫面上。
+
+### 為什麼地理編碼放在後端（GAS），不是前端直接呼叫 Nominatim
+
+Nominatim 的使用規範要求請求要帶一個**有意義的 `User-Agent` header**識別應用程式。
+瀏覽器的 `fetch`/`XHR` 把 `User-Agent` 列為 forbidden header——前端 JS 沒辦法自訂這個值，
+瀏覽器一律送出自己的 UA 字串，沒辦法真的符合這條規範。GAS 的 `UrlFetchApp` 可以自訂任意
+header，所以地理編碼查詢刻意放在後端做（`geocodePlace_`），才能真的照規範帶上
+`User-Agent: yoxi-app/1.0 (hackathon demo; ...)`。
+
+其他使用規範重點：
+- **最多每秒 1 次請求**：目前只有使用者按「儲存到想去的地方」時查一次，用量很小，
+  沒特別做速率限制；`Code.gs` 的 `NOMINATIM_URL` 常數旁邊有註解標記這件事，
+  以後如果要做批次 / 高流量查詢，要在 `geocodePlace_` 加節流。
+- **逾時**：GAS 的 `UrlFetchApp` 沒有可設定的逾時參數（Apps Script 本身的限制），
+  沒辦法保證嚴格幾秒內一定回來——這裡只做失敗防呆（try/catch + 檢查回應／結果），
+  查詢失敗或找不到都直接回 `null`，不會卡住存檔流程；前端 `createPlace()` 的逾時
+  已拉長到 20 秒給這個多出來的查詢留緩衝。
+
+### 準確度
+
+- **精確查詢（`geocoded`）**：Nominatim 找到的是真實地址對應的座標，準確度看店名／地區
+  文字有多完整、Nominatim 資料庫有沒有收錄這個地點。
+- **估算（`estimated`）**：Gemini 依世界知識用「大概位置」，可能誤差到幾百公尺甚至抓到
+  馬路對面——知名地標（連鎖店、觀光景點）通常比較準，小眾 / 新開的店家誤差可能較大。
 - 路線規劃畫面（`src/lib/route.ts` 的 `placeCoord`）會優先用地點自己的 `lat` / `lng`；
   真的沒有實值時才 fallback 回原型的假座標，地圖不會因此空白或壞掉。
-- 之後如果要更準，可以再接真正的地理編碼（geocoding）服務校正，這次先不做。
 
 ## 8. 之後改 Code.gs 怎麼重新部署
 
@@ -143,3 +172,5 @@ const DEPLOYED_API_URL = 'https://script.google.com/macros/s/AKfycb....../exec';
 | 辨識回「Gemini API 回應異常（已重試 2 次）（HTTP 503）」 | 免費層過載，連重試 3 次都沒排到；通常是短暫的，晚一點再上傳一次同一張截圖即可 |
 | 辨識一直回「辨識失敗，請手動填寫」 | 通常是 Gemini 沒回乾淨 JSON（已有防呆解析仍失敗），或圖片內容真的看不出地點；手動填寫即可，不影響儲存 |
 | 改了 `Code.gs` 但辨識行為沒變 | 忘記重新部署，見第 8 節「Manage deployments → New version」 |
+| 存的地點 `coordSource` 一直是 `estimated` 或空字串，沒有 `geocoded` | 正常情況：Nominatim 查無結果就會這樣。可以查 Executions 的 log 看是「查無結果」還是「查詢失敗」；店名 + 地區文字太模糊、或地點根本沒被 OSM 收錄都會查不到 |
+| 存新地點變得比較慢 | 預期中的，因為多打一次 Nominatim；GAS 沒有逾時控制，查詢失敗一樣會 fallback，不會卡死，只是這次請求會多等一下 |

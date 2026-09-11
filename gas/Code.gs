@@ -20,12 +20,14 @@
  *   （GAS 沒有真的 HTTP status code，用 success 欄位表示）
  *
  * 欄位（Places 分頁）：
- *   id / userId / storeName / region / category / source / imageUrl / lat / lng / createdAt / visited
- *   - lat / lng：截圖辨識（Gemini）時會順便估算大概座標，有估算出來就存進這兩欄；
- *     Gemini 沒把握、或使用者直接手動填寫（沒走辨識）時留空，doGet 讀出來是 null。
- *     這是 Gemini 依世界知識估算的「大概位置」，不是精確 GPS，也沒有接真正的
- *     geocoding 服務——準確度依地點知名度而定，見 gas/README.md。
- *   - 舊的 Places 分頁如果沒有這兩欄，第一次讀 / 寫時會自動補上標題（見 ensureHeaders_）。
+ *   id / userId / storeName / region / category / source / imageUrl / lat / lng /
+ *   coordSource / createdAt / visited
+ *   - lat / lng：新增地點時依序嘗試「Nominatim 地理編碼查詢」（精確）→
+ *     「前端帶來的 Gemini 估算座標」（大概）→ 都沒有就留空，doGet 讀出來是 null。
+ *     見 handleCreatePlace_ / geocodePlace_、gas/README.md。
+ *   - coordSource：內部除錯用、不給使用者看，標記這筆座標是 'geocoded'（Nominatim
+ *     精確查詢）還是 'estimated'（Gemini 估算），都沒有就是空字串。
+ *   - 舊的 Places 分頁如果缺這些欄位，第一次讀 / 寫時會自動補上標題（見 ensureHeaders_）。
  *
  * 截圖辨識（Gemini API）：
  *   - 金鑰放在 Script Properties（PropertiesService），不寫死在程式碼裡；
@@ -48,6 +50,7 @@ const HEADERS = [
   'imageUrl',
   'lat',
   'lng',
+  'coordSource', // 內部除錯用，不給使用者看：'geocoded'（Nominatim 精確查詢）/ 'estimated'（Gemini 估算）/ ''（都沒有）
   'createdAt',
   'visited',
 ];
@@ -67,6 +70,23 @@ const RECOGNIZE_IMAGE_MAX_LEN = 8000000;
 // 免費層偶爾會 503（暫時性過載）或連線逾時，遇到就等一下重試，不用整個當掉。
 // 陣列長度 = 重試次數，值 = 該次重試前要等多久（毫秒）。
 const RECOGNIZE_RETRY_DELAYS_MS = [600, 1500];
+
+// ── 地理編碼（Nominatim / OpenStreetMap，免費）設定 ─────────────────────────
+// 使用規範重點：
+//   1. 一定要帶有意義的 User-Agent 識別應用程式。
+//      這是刻意把地理編碼放在後端（而不是前端 fetch）的原因：瀏覽器的 fetch/XHR
+//      把 User-Agent 列為 forbidden header，JS 沒辦法自訂，瀏覽器會忽略你設的值、
+//      一律送出瀏覽器自己的 UA 字串——沒辦法真的符合這條規範。GAS 的 UrlFetchApp
+//      可以自訂任意 header，這裡才能真的照規範帶上有意義的 User-Agent。
+//   2. 規範要求最多每秒 1 次請求。這次只有使用者按「儲存到想去的地方」時才查一次，
+//      用量很小，暫時不用特別做節流；以後如果要批次 / 高流量查詢，記得在
+//      geocodePlace_ 這裡加速率限制（例如用 CacheService 記上次查詢時間）。
+//   3. GAS 的 UrlFetchApp 沒有可設定的逾時參數（Apps Script 本身的限制，不是我們
+//      沒做），沒辦法保證嚴格幾秒內一定回來；這裡只做失敗防呆（try/catch +
+//      檢查回應／結果），查詢失敗或找不到都直接回 null，不會卡住存檔流程。
+const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
+const NOMINATIM_USER_AGENT =
+  'yoxi-app/1.0 (hackathon demo; https://github.com/ZeroOneThree013/yoxi-app)';
 
 const RECOGNIZE_PROMPT = [
   '你是一個從社群媒體或地圖 App 的手機截圖中擷取地點資訊的助理。',
@@ -283,6 +303,19 @@ function handleCreatePlace_(body) {
     // 圖片太大塞不進儲存格就先略過（之後接圖床／VLM 再處理）
     if (imageUrl.length > IMAGE_MAX_LEN) imageUrl = '';
 
+    // 座標優先順序：Nominatim 精確查詢 > 前端帶來的 Gemini 估算 > 都沒有（留空）。
+    // coordSource 是內部除錯用的註記，不給使用者看。
+    let lat = numOrBlank_(body.lat);
+    let lng = numOrBlank_(body.lng);
+    let coordSource = lat !== '' && lng !== '' ? 'estimated' : '';
+
+    const geocoded = geocodePlace_(storeName, region);
+    if (geocoded) {
+      lat = geocoded.lat;
+      lng = geocoded.lng;
+      coordSource = 'geocoded';
+    }
+
     const record = {
       id: 'p_' + Date.now() + '_' + Math.floor(Math.random() * 1e6),
       userId: userId,
@@ -291,9 +324,9 @@ function handleCreatePlace_(body) {
       category: category,
       source: source,
       imageUrl: imageUrl,
-      // lat / lng 是可選欄位：前端目前不會送，沒有就存空字串
-      lat: numOrBlank_(body.lat),
-      lng: numOrBlank_(body.lng),
+      lat: lat,
+      lng: lng,
+      coordSource: coordSource,
       createdAt: new Date().toISOString(),
       visited: body.visited === true,
     };
@@ -315,6 +348,55 @@ function handleCreatePlace_(body) {
     return jsonOk_(record);
   } catch (err) {
     return jsonError_('寫入失敗：' + (err && err.message ? err.message : err));
+  }
+}
+
+/**
+ * 用「店名 + 地區」查 Nominatim，找到就回精確座標 { lat, lng }，
+ * 查無結果 / 請求失敗都回 null——呼叫端會 fallback 回 Gemini 估算的座標，
+ * 不會因為這裡失敗卡住存檔流程。使用規範細節見上方 NOMINATIM_* 常數註解。
+ */
+function geocodePlace_(storeName, region) {
+  const query = [storeName, region]
+    .filter(function (s) {
+      return s;
+    })
+    .join(' ')
+    .trim();
+  if (!query) return null;
+
+  try {
+    const url =
+      NOMINATIM_URL + '?format=json&limit=1&q=' + encodeURIComponent(query);
+    const res = UrlFetchApp.fetch(url, {
+      method: 'get',
+      headers: { 'User-Agent': NOMINATIM_USER_AGENT },
+      muteHttpExceptions: true,
+    });
+    if (res.getResponseCode() !== 200) {
+      Logger.log(
+        'Nominatim 查詢非 200（' + res.getResponseCode() + '），query=' + query,
+      );
+      return null;
+    }
+
+    const results = JSON.parse(res.getContentText());
+    if (!results || !results.length) {
+      Logger.log('Nominatim 查無結果，query=' + query);
+      return null;
+    }
+
+    const lat = Number(results[0].lat);
+    const lng = Number(results[0].lon);
+    if (isNaN(lat) || isNaN(lng)) return null;
+
+    Logger.log('Nominatim 查到座標，query=' + query + ' → ' + lat + ',' + lng);
+    return { lat: lat, lng: lng };
+  } catch (err) {
+    Logger.log(
+      'Nominatim 查詢失敗：' + (err && err.message ? err.message : err),
+    );
+    return null;
   }
 }
 

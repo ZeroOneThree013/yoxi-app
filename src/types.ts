@@ -26,9 +26,9 @@ export interface Place {
   /** 來源：Instagram / Facebook / Google Maps 截圖 */
   source: string;
   /**
-   * 經緯度。截圖辨識（Gemini）時會順便依世界知識估算大概座標；Gemini 沒把握、
-   * 或地點是手動輸入沒走辨識，就是 null——不是精確 GPS，也沒接真正的 geocoding
-   * 服務，準確度依地點知名度而定（見 gas/README.md）。
+   * 經緯度。新增地點時後端依序嘗試：Nominatim 地理編碼查詢（精確，依店名＋地區
+   * 文字查）→ 截圖辨識（Gemini）順便估算的大概座標（依世界知識，可能誤差幾百公尺）
+   * → 都沒有就是 null（見 gas/README.md）。
    * 路線規劃畫面用 lib/route.ts 的 placeCoord() 取用：有實值就用，沒有才 fallback
    * 回原型假座標。這兩個值不在任何畫面直接顯示／編輯。
    */

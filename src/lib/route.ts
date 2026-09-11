@@ -25,10 +25,11 @@ interface RawStop {
 /**
  * 取地點座標給「路線地圖 / 距離計算」用。
  *
- * 優先用地點自己存的 lat / lng（截圖辨識時 Gemini 依世界知識估算的大概座標，
- * 見 gas/Code.gs handleRecognizePlace_ 與 gas/README.md）。
- * 沒有實值時（Gemini 沒把握、或地點是手動輸入沒走辨識）才 fallback 回原型的
- * 假座標——依 id 把地點打散在「目前位置」附近，純粹讓地圖不要空白，不是真的位置。
+ * 優先用地點自己存的 lat / lng——新增時後端依序試過 Nominatim 地理編碼查詢
+ * （精確）跟 Gemini 估算（大概），見 gas/Code.gs handleCreatePlace_ 與
+ * gas/README.md。都沒有實值時（查無結果、Gemini 也沒把握、或手動輸入沒走辨識）
+ * 才 fallback 回原型的假座標——依 id 把地點打散在「目前位置」附近，純粹讓
+ * 地圖不要空白，不是真的位置。
  */
 export function placeCoord(place: {
   id: string;

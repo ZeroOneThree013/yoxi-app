@@ -20,8 +20,8 @@ export interface PlaceRecord {
   source: string;
   imageUrl: string;
   /**
-   * 截圖辨識（Gemini）順便估算的大概座標；沒估算出來（或沒走辨識）就是 null。
-   * 不是精確 GPS，是依店名／地區文字的世界知識估算，見 gas/README.md。
+   * 新增時後端依序嘗試：Nominatim 地理編碼查詢（精確）→ 這裡送來的 Gemini
+   * 估算座標（大概）→ 都沒有就是 null。實際用哪個由後端決定，見 gas/README.md。
    */
   lat: number | null;
   lng: number | null;
@@ -37,7 +37,11 @@ export interface NewPlaceInput {
   source: string;
   /** 截圖 base64；base64 圖片之後接圖床再一起處理，目前多半留空 */
   imageUrl?: string;
-  /** 辨識結果的估算座標，背景帶過去存檔用，使用者不會編輯這兩個值 */
+  /**
+   * 辨識結果的估算座標，背景帶過去存檔用，使用者不會編輯這兩個值。
+   * 後端存檔前會先試 Nominatim 精確查詢，查得到就會覆蓋掉這裡送的估算值——
+   * 這兩個欄位是「查不到時的備援」，不是最終一定會用的值。
+   */
   lat?: number | null;
   lng?: number | null;
 }
@@ -61,8 +65,9 @@ const isConfigured = () => API_BASE_URL.length > 0;
 
 /**
  * 後端 record → 前端 Place。
- * lat / lng 直接帶後端的值（有辨識估算就有值，沒有就 null）。路線地圖需要座標時，
- * 由 lib/route.ts 的 placeCoord() 優先用這裡的實值，沒有才回傳假座標 fallback。
+ * lat / lng 直接帶後端的值（Nominatim 查到就是精確值，查不到用 Gemini 估算，
+ * 都沒有就 null）。路線地圖需要座標時，由 lib/route.ts 的 placeCoord() 優先用
+ * 這裡的實值，沒有才回傳假座標 fallback。
  */
 function toPlace(r: PlaceRecord): Place {
   return {
@@ -165,7 +170,7 @@ export async function createPlace(
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ userId, ...input }),
     },
-    15000,
+    20000, // 後端這次會多打一次 Nominatim 地理編碼，逾時拉長一點
   );
   const json = await parseJson<ApiResponse<PlaceRecord>>(res);
   if (!json.success) throw new Error(json.message || '新增收藏地點失敗');
