@@ -36,6 +36,14 @@ export interface NewPlaceInput {
   imageUrl?: string;
 }
 
+/** 截圖辨識結果（Gemini 回傳，對應 spec 2.4 的辨識欄位） */
+export interface RecognizedPlace {
+  storeName: string;
+  region: string;
+  category: string;
+  source: string;
+}
+
 type ApiResponse<T> =
   | { success: true; data: T }
   | { success: false; message: string };
@@ -59,6 +67,13 @@ function toPlace(r: PlaceRecord): Place {
     visited: r.visited === true,
     imageDataUrl: r.imageUrl || undefined,
   };
+}
+
+/** 把 `data:image/jpeg;base64,xxxx` 拆成 mimeType 跟純 base64（Gemini 要的格式） */
+function splitDataUrl(dataUrl: string): { mimeType: string; base64: string } {
+  const match = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
+  if (!match) throw new Error('圖片格式錯誤，無法送出辨識');
+  return { mimeType: match[1], base64: match[2] };
 }
 
 async function parseJson<T>(res: Response): Promise<T> {
@@ -146,4 +161,35 @@ export async function createPlace(
   const json = await parseJson<ApiResponse<PlaceRecord>>(res);
   if (!json.success) throw new Error(json.message || '新增收藏地點失敗');
   return toPlace(json.data);
+}
+
+/**
+ * 送截圖去後端呼叫 Gemini 辨識（對應「上傳截圖 → 開始 AI 辨識」）。
+ * 呼叫端（Upload2）要自己 catch：辨識失敗時讓欄位留白給使用者手動填寫，
+ * 不能讓整個流程卡住——Gemini 免費額度有請求次數限制，額度用完或服務不穩時
+ * 這裡一定會丟錯，是預期中的 fallback 路徑，不是 bug。
+ */
+export async function recognizePlace(
+  imageDataUrl: string,
+): Promise<RecognizedPlace> {
+  if (!isConfigured()) {
+    throw new Error('尚未設定後端網址（截圖辨識需要透過後端呼叫 Gemini API）');
+  }
+  const { mimeType, base64 } = splitDataUrl(imageDataUrl);
+  const res = await request(
+    API_BASE_URL,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'recognizePlace',
+        imageBase64: base64,
+        mimeType,
+      }),
+    },
+    25000, // Gemini 呼叫比較久，逾時拉長一點
+  );
+  const json = await parseJson<ApiResponse<RecognizedPlace>>(res);
+  if (!json.success) throw new Error(json.message || '辨識失敗，請手動填寫');
+  return json.data;
 }

@@ -11,12 +11,16 @@
   失敗／被拒／不支援時退回台南市東區預設座標並在畫面上提示
 - **資料**：
   - **「想去的地方」已接後端**：Google Apps Script + Google Sheets（`src/lib/api.ts`、`gas/`）
+  - **截圖辨識已接 Gemini API**（多模態，取代原本假資料）：上傳截圖 → 前端壓縮
+    （`src/lib/image.ts`）→ 後端呼叫 Gemini 辨識 → 回可編輯欄位；辨識失敗（額度用完／
+    服務不穩）會讓欄位留白給使用者手動填寫，不卡住流程
   - 其餘功能仍是 mock（`src/data/mock.ts`）；各收藏地點的 lat/lng 欄位已加好但值還是空的，
     路線規劃畫面的地點座標暫時仍用假資料（`src/lib/route.ts` 的 `placeCoord`）
 
-> 後端網址還沒填時，「想去的地方」會自動退回本機 mock（重整會重置），畫面不會壞。
+> 後端網址還沒填時，「想去的地方」會自動退回本機 mock（重整會重置）；
+> Gemini 金鑰還沒設定時，辨識會直接顯示「請手動填寫」，畫面都不會壞。
 > 設定方式見 `gas/README.md` 與 `src/config.ts`。
-> 其餘照 spec 第 4 節的表格逐項換：帳號系統 → 地圖／路徑規劃 → VLM/OCR → 叫車／訂位。
+> 其餘照 spec 第 4 節的表格逐項換：帳號系統 → 地圖／路徑規劃（geocoding）→ 叫車／訂位。
 
 ## 開發
 
@@ -59,11 +63,15 @@ npm run preview  # 本機預覽 build 結果
 
 ## 後端串接（想去的地方）
 
-- API 層：`src/lib/api.ts`（`fetchPlaces` / `createPlace`）
+- API 層：`src/lib/api.ts`（`fetchPlaces` / `createPlace` / `recognizePlace`）
 - 設定：`src/config.ts` 的 `API_BASE_URL`（或環境變數 `VITE_API_BASE_URL`）
 - 後端程式與部署步驟：`gas/Code.gs`、`gas/README.md`
-- Google Sheets 分頁 `Places`，欄位：`id / userId / storeName / region / category / source / imageUrl / createdAt / visited`
+- Google Sheets 分頁 `Places`，欄位：
+  `id / userId / storeName / region / category / source / imageUrl / lat / lng / createdAt / visited`
+  （`lat` / `lng` 是預留欄位，見 `gas/README.md`）
 - POST 用 `Content-Type: text/plain` 避開 CORS preflight（spec 6.2）
+- 截圖辨識：`doPost` body 帶 `action: 'recognizePlace'` 時改呼叫 Gemini API
+  （金鑰放 GAS 的 Script Properties，不寫死在程式碼），其餘 `doPost` 走新增地點邏輯
 
 ## 部署到 GitHub Pages
 

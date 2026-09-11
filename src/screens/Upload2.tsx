@@ -1,17 +1,19 @@
 import { useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { BottomBar, Button, ScreenScroll, TopBar } from '../components/ui';
-import { createPlace } from '../lib/api';
+import { createPlace, recognizePlace } from '../lib/api';
 import { useApp } from '../state/AppState';
 
 type NavState = { imageDataUrl?: string; fileName?: string };
 
 const FIELDS = [
-  { key: 'region', label: '地點' },
-  { key: 'name', label: '店名' },
-  { key: 'category', label: '種類' },
-  { key: 'source', label: '來源' },
+  { key: 'region', label: '地點', placeholder: '例如：台南市中西區' },
+  { key: 'name', label: '店名', placeholder: '尚未辨識，請手動輸入' },
+  { key: 'category', label: '種類', placeholder: '例如：咖啡廳' },
+  { key: 'source', label: '來源', placeholder: '例如：Instagram' },
 ] as const;
+
+const EMPTY_FORM = { region: '', name: '', category: '', source: '' };
 
 export default function Upload2() {
   const navigate = useNavigate();
@@ -21,22 +23,35 @@ export default function Upload2() {
   const [phase, setPhase] = useState<'idle' | 'processing' | 'done'>('idle');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  // AI 擷取的示範結果（spec 2.4：前端只顯示可編輯的最終結果，不呈現 OCR 中間畫面）
-  const [form, setForm] = useState({
-    region: '台南市中西區',
-    name: state.fileName || '林檎二訪咖啡',
-    category: '咖啡廳',
-    source: 'Instagram',
-  });
+  const [recognizeError, setRecognizeError] = useState<string | null>(null);
+  // 前端只顯示可編輯的最終結果，不呈現辨識過程的中間畫面（spec 2.4）
+  const [form, setForm] = useState(EMPTY_FORM);
 
   // 直接進到這頁但沒有帶圖片時，回上一步
   if (!state.imageDataUrl && phase === 'idle') {
     return <Navigate to="/places/upload" replace />;
   }
 
-  const runExtract = () => {
+  const runExtract = async () => {
+    if (!state.imageDataUrl) return;
     setPhase('processing');
-    setTimeout(() => setPhase('done'), 900);
+    setRecognizeError(null);
+    try {
+      const result = await recognizePlace(state.imageDataUrl);
+      setForm({
+        region: result.region,
+        name: result.storeName,
+        category: result.category || '未分類',
+        source: result.source || '截圖上傳',
+      });
+    } catch (e) {
+      // Fallback：Gemini 額度用完／服務不穩／辨識不出來都會走到這裡。
+      // 欄位留白讓使用者手動填寫，不能卡住整個流程。
+      setForm(EMPTY_FORM);
+      setRecognizeError(e instanceof Error ? e.message : '辨識失敗，請手動填寫');
+    } finally {
+      setPhase('done');
+    }
   };
 
   const save = async () => {
@@ -48,7 +63,7 @@ export default function Upload2() {
         region: form.region.trim(),
         category: form.category.trim() || '未分類',
         source: form.source.trim() || '截圖上傳',
-        // 截圖 base64 之後接 VLM／圖床再一起處理（spec 第 4 節 imageUrl 欄位）
+        // 截圖 base64 之後接圖床再一起處理（spec 第 4 節 imageUrl 欄位）
       });
       dispatch({
         type: 'addPlace',
@@ -77,18 +92,23 @@ export default function Upload2() {
           {phase === 'processing' && (
             <div className="flex flex-col items-center gap-2 rounded-xl bg-black/55 px-4 py-3 text-white">
               <div className="spinner" />
-              VLM 圖片轉文字辨識中…
+              AI 辨識截圖中…
             </div>
           )}
           {phase === 'done' && (
             <div className="rounded-xl bg-black/55 px-4 py-3 text-white">
-              截圖已辨識 ✓
+              {recognizeError ? '辨識未完成，可手動填寫' : '截圖已辨識 ✓'}
             </div>
           )}
         </div>
 
         {phase === 'done' && (
           <>
+            {recognizeError && (
+              <p className="mb-2 rounded-lg bg-[#F9DED5] px-3 py-2 text-[11.5px] leading-relaxed text-red-deep">
+                {recognizeError}，請直接手動填寫下方欄位。
+              </p>
+            )}
             <p className="mb-1.5 text-[12px] text-muted">
               AI 擷取的關鍵字（可手動修改）
             </p>
@@ -100,15 +120,16 @@ export default function Upload2() {
                     i < FIELDS.length - 1 ? 'border-b border-line' : ''
                   }`}
                 >
-                  <span className="text-[12px] font-bold text-[#8A8175]">
+                  <span className="shrink-0 text-[12px] font-bold text-[#8A8175]">
                     {f.label}
                   </span>
                   <input
                     value={form[f.key]}
+                    placeholder={f.placeholder}
                     onChange={(e) =>
                       setForm({ ...form, [f.key]: e.target.value })
                     }
-                    className="w-3/5 border-none bg-transparent py-0.5 text-right text-[13.5px] font-bold text-ink outline-none focus:border-b-[1.5px] focus:border-red"
+                    className="w-3/5 border-none bg-transparent py-0.5 text-right text-[13.5px] font-bold text-ink outline-none placeholder:font-normal placeholder:text-[#B3AB9E] focus:border-b-[1.5px] focus:border-red"
                   />
                 </div>
               ))}
@@ -131,7 +152,7 @@ export default function Upload2() {
           <Button
             variant="teal"
             disabled={phase === 'processing'}
-            onClick={runExtract}
+            onClick={() => void runExtract()}
           >
             {phase === 'processing' ? '辨識中…' : '開始 AI 辨識'}
           </Button>
