@@ -7,15 +7,37 @@ function formatClock(d: Date): string {
   return `${hh}:${mm}`;
 }
 
-/** 狀態列的即時時鐘：進畫面先讀一次目前時間，之後每分鐘更新一次 */
+/**
+ * 狀態列的即時時鐘：進畫面先讀一次目前時間立刻顯示，
+ * 接著對齊到下一個整分鐘邊界更新一次，之後才固定每 60 秒更新。
+ *
+ * 不能直接從掛載那一刻 setInterval(60_000)：計時器是從「掛載時間」開始算，
+ * 跟真正的分鐘邊界對不齊，畫面上的數字要等最多 59 秒後才會跳，
+ * 看起來就像時間固定慢了一截。所以先用 setTimeout 補上「掛載時間到下一個
+ * 整分鐘」這段零頭，之後的 setInterval 才會準確落在整分鐘上，不會累積誤差。
+ * 每次更新都重新 new Date() 讀系統當下時間，不用舊 Date 物件累加。
+ */
 function useClock(): string {
   const [time, setTime] = useState(() => formatClock(new Date()));
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setTime(formatClock(new Date()));
-    }, 60_000);
-    return () => clearInterval(timer);
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+
+    const tick = () => setTime(formatClock(new Date()));
+
+    const now = new Date();
+    const msToNextMinute =
+      60_000 - (now.getSeconds() * 1000 + now.getMilliseconds());
+
+    const timeoutId = setTimeout(() => {
+      tick(); // 對齊到整分鐘邊界，先更新一次
+      intervalId = setInterval(tick, 60_000); // 之後每 60 秒準時更新
+    }, msToNextMinute);
+
+    return () => {
+      clearTimeout(timeoutId);
+      if (intervalId !== undefined) clearInterval(intervalId);
+    };
   }, []);
 
   return time;
