@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import yoxiLogo from '../assets/yoxi-logo.png';
 import {
   BottomBar,
   Button,
@@ -16,8 +17,12 @@ export default function Onboarding1() {
   return (
     <>
       <ScreenScroll>
-        <div className="mb-[18px] mt-3 h-14 w-14 overflow-hidden rounded-2xl shadow-[0_6px_16px_-6px_rgba(255,33,12,0.55)]">
-          <img src="./favicon.svg" alt="yoxi" className="h-full w-full" />
+        <div className="mb-[18px] mt-3 aspect-square h-14 w-14 overflow-hidden rounded-2xl shadow-[0_6px_16px_-6px_rgba(255,33,12,0.55)]">
+          <img
+            src={yoxiLogo}
+            alt="yoxi"
+            className="h-full w-full object-contain"
+          />
         </div>
         <StepDots step={1} />
         <h2 className="mb-1.5 font-display text-[23px] font-semibold">
