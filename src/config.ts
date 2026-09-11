@@ -9,7 +9,7 @@
 // │  例：https://script.google.com/macros/s/AKfycb..................../exec │
 // │  部署步驟見 gas/README.md                                            │
 // └───────────────────────────────────────────────────────────────────┘
-const DEPLOYED_API_URL = '';
+const DEPLOYED_API_URL = 'https://script.google.com/macros/s/AKfycbw7ZE4dYcZPD0WklEwyCTmRdYLNuB1O0vfbw8hCg6eCosiyktpejxbcsk53Mk2PaF6m/exec';
 
 // 也可用環境變數覆蓋（專案根目錄建 .env.local，寫 VITE_API_BASE_URL=...）
 export const API_BASE_URL = (
