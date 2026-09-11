@@ -52,7 +52,7 @@ const IMAGE_MAX_LEN = 45000; // Google Sheets 單一儲存格上限約 50,000 �
 // ── 截圖辨識（Gemini API）設定 ──────────────────────────────────────────
 // 如果這個 model 之後 deprecated，到 Google AI Studio 文件查目前可用的多模態
 // model 名稱，改這裡即可，不用動呼叫邏輯。
-const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_MODEL = 'gemini-3.6-flash';
 const GEMINI_API_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/' +
   GEMINI_MODEL +
@@ -444,4 +444,9 @@ function normalizeSource_(v) {
   const s = v ? String(v).trim() : '';
   if (s === 'Instagram' || s === 'Facebook' || s === 'Google Maps') return s;
   return '截圖上傳';
+}
+
+function testAuth() {
+  const response = UrlFetchApp.fetch('https://www.google.com');
+  Logger.log(response.getResponseCode());
 }
