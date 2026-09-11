@@ -6,7 +6,9 @@ import type {
   RecommendedPlace,
 } from '../types';
 
-// ── 假的 GPS 目前位置：台南市東區（spec 第 4 節：正式版改真實 Geolocation API）
+// ── 台南市東區座標（原型寫死的假 GPS）。
+// 使用者目前位置現在走真實 Geolocation（見 hooks/useGeolocation.ts）；
+// 這組座標只在「定位失敗 / 被拒絕 / 不支援」時當 fallback 用。
 export const MOCK_GPS = { lat: 22.9838, lng: 120.2231, label: '台南市東區' };
 
 export const DEFAULT_PROFILE: Profile = {

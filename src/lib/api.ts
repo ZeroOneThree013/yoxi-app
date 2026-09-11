@@ -1,5 +1,5 @@
 import { API_BASE_URL, DEMO_USER_ID } from '../config';
-import { MOCK_GPS, MOCK_PLACES } from '../data/mock';
+import { MOCK_PLACES } from '../data/mock';
 import type { Place } from '../types';
 
 /**
@@ -19,6 +19,9 @@ export interface PlaceRecord {
   category: string;
   source: string;
   imageUrl: string;
+  /** 預留欄位，目前後端一律回 null（還沒有座標來源） */
+  lat: number | null;
+  lng: number | null;
   createdAt: string;
   visited: boolean;
 }
@@ -41,21 +44,18 @@ const isConfigured = () => API_BASE_URL.length > 0;
 
 /**
  * 後端 record → 前端 Place。
- * 座標之後接 geocoding 再補（spec 第 4 節），這裡先依 id 產生「目前位置附近」
- * 的佔位座標，讓 AI 路線地圖不會壞。
+ * lat / lng 直接帶後端的值（目前一律 null）。路線地圖需要座標時，
+ * 由 lib/route.ts 的 placeCoord() 在沒有實值時回傳假座標（已知下一步工作）。
  */
 function toPlace(r: PlaceRecord): Place {
-  const seed = String(r.id)
-    .split('')
-    .reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
   return {
     id: String(r.id),
     name: r.storeName || '未命名地點',
     region: r.region || '',
     category: r.category || '未分類',
     source: r.source || '截圖上傳',
-    lat: MOCK_GPS.lat + ((seed % 40) - 20) / 1000,
-    lng: MOCK_GPS.lng + (((seed * 7) % 40) - 20) / 1000,
+    lat: typeof r.lat === 'number' ? r.lat : null,
+    lng: typeof r.lng === 'number' ? r.lng : null,
     visited: r.visited === true,
     imageDataUrl: r.imageUrl || undefined,
   };
@@ -125,6 +125,8 @@ export async function createPlace(
       category: input.category,
       source: input.source,
       imageUrl: input.imageUrl ?? '',
+      lat: null,
+      lng: null,
       createdAt: new Date().toISOString(),
       visited: false,
     });

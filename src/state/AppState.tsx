@@ -8,10 +8,12 @@ import {
   type Dispatch,
   type ReactNode,
 } from 'react';
-import { DEFAULT_PROFILE, DEFAULT_QUIZ, MOCK_DAILY_TASK } from '../data/mock';
+import { DEFAULT_PROFILE, DEFAULT_QUIZ, MOCK_DAILY_TASK, MOCK_GPS } from '../data/mock';
 import { fetchPlaces } from '../lib/api';
+import { useGeolocation, type GeolocationStatus } from '../hooks/useGeolocation';
 import type {
   Confirmation,
+  Coord,
   DailyTask,
   Place,
   PlannedRoute,
@@ -29,6 +31,11 @@ interface State {
   placesStatus: PlacesStatus;
   placesError: string | null;
   dailyTask: DailyTask;
+  /** 使用者目前位置：GPS 成功＝真實座標；失敗／被拒＝fallback（台南市東區）；尚未定位＝null */
+  userLocation: Coord | null;
+  locationStatus: GeolocationStatus;
+  /** userLocation 目前是不是 fallback（用來決定要不要顯示「暫時顯示預設位置」提示） */
+  locationIsFallback: boolean;
   /** 在「選擇任務地點」畫面勾選的 id（可跨 saved / rec） */
   selectedPlaceIds: string[];
   route: PlannedRoute | null;
@@ -43,6 +50,8 @@ type Action =
   | { type: 'placesLoading' }
   | { type: 'placesLoaded'; places: Place[] }
   | { type: 'placesError'; message: string }
+  | { type: 'setLocationStatus'; status: GeolocationStatus }
+  | { type: 'setUserLocation'; coord: Coord; isFallback: boolean }
   | { type: 'addPlace'; place: Place }
   | { type: 'toggleSelected'; id: string }
   | { type: 'clearSelected' }
@@ -60,6 +69,9 @@ const initialState: State = {
   placesStatus: 'idle',
   placesError: null,
   dailyTask: MOCK_DAILY_TASK,
+  userLocation: null,
+  locationStatus: 'idle',
+  locationIsFallback: false,
   selectedPlaceIds: [],
   route: null,
   confirmation: null,
@@ -73,10 +85,13 @@ function load(): State {
     return {
       ...initialState,
       ...saved,
-      // 這些是後端資料或流程暫存，不從 storage 還原
+      // 這些是後端資料 / 定位 / 流程暫存，不從 storage 還原
       places: [],
       placesStatus: 'idle',
       placesError: null,
+      userLocation: null,
+      locationStatus: 'idle',
+      locationIsFallback: false,
       selectedPlaceIds: [],
       route: null,
       confirmation: null,
@@ -121,6 +136,14 @@ function reducer(state: State, action: Action): State {
     }
     case 'placesError':
       return { ...state, placesStatus: 'error', placesError: action.message };
+    case 'setLocationStatus':
+      return { ...state, locationStatus: action.status };
+    case 'setUserLocation':
+      return {
+        ...state,
+        userLocation: action.coord,
+        locationIsFallback: action.isFallback,
+      };
     case 'addPlace':
       // 樂觀更新：先塞進清單，回清單畫面時會再向後端拉一次覆蓋
       return { ...state, places: [action.place, ...state.places] };
@@ -152,6 +175,8 @@ interface Ctx extends State {
   dispatch: Dispatch<Action>;
   /** 向後端重新抓收藏地點清單 */
   refreshPlaces: () => Promise<void>;
+  /** 由需要定位的畫面在掛載時呼叫，觸發一次 GPS 權限請求 */
+  ensureUserLocation: () => void;
 }
 
 const AppStateContext = createContext<Ctx | null>(null);
@@ -189,9 +214,41 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     void refreshPlaces();
   }, [refreshPlaces]);
 
+  // ── 真實 GPS 定位（hooks/useGeolocation）→ 同步進 app state
+  const { status: geoStatus, position: geoPosition, requestLocation } =
+    useGeolocation();
+
+  useEffect(() => {
+    dispatch({ type: 'setLocationStatus', status: geoStatus });
+    if (geoStatus === 'success' && geoPosition) {
+      dispatch({
+        type: 'setUserLocation',
+        coord: { lat: geoPosition.lat, lng: geoPosition.lng },
+        isFallback: false,
+      });
+    } else if (
+      geoStatus === 'denied' ||
+      geoStatus === 'error' ||
+      geoStatus === 'unsupported'
+    ) {
+      // 失敗 / 被拒 / 不支援 → 退回原型寫死的台南市東區座標
+      dispatch({
+        type: 'setUserLocation',
+        coord: { lat: MOCK_GPS.lat, lng: MOCK_GPS.lng },
+        isFallback: true,
+      });
+    }
+  }, [geoStatus, geoPosition]);
+
+  // 只在「還沒定位過」時觸發一次；成功或失敗後就不再自動重試，
+  // 避免每次切畫面又跳權限請求、或出現「定位中…」與「預設位置」並存的狀態。
+  const ensureUserLocation = useCallback(() => {
+    if (geoStatus === 'idle') requestLocation();
+  }, [geoStatus, requestLocation]);
+
   const value = useMemo<Ctx>(
-    () => ({ ...state, dispatch, refreshPlaces }),
-    [state, refreshPlaces],
+    () => ({ ...state, dispatch, refreshPlaces, ensureUserLocation }),
+    [state, refreshPlaces, ensureUserLocation],
   );
   return (
     <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>

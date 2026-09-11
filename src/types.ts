@@ -25,8 +25,14 @@ export interface Place {
   category: string;
   /** 來源：Instagram / Facebook / Google Maps 截圖 */
   source: string;
-  lat: number;
-  lng: number;
+  /**
+   * 經緯度。Places sheet 已有這兩個欄位，但目前沒有座標來源，實際多半是 null。
+   * ⚠️ 已知下一步：路線規劃畫面的地點座標暫時仍沿用原型假資料
+   *   （見 lib/route.ts 的 placeCoord），等接「截圖辨識取得座標」或
+   *   「地區文字 geocoding」再填實值。這次不在任何畫面直接使用／顯示。
+   */
+  lat?: number | null;
+  lng?: number | null;
   /** 是否已造訪過 */
   visited: boolean;
   /** 使用者上傳的截圖（DataURL），mock 階段可有可無 */
@@ -79,6 +85,8 @@ export interface PlannedRoute {
   totalDist: number;
   totalTime: number;
   totalCost: number;
+  /** 規劃當下使用的出發點：GPS 成功＝真實座標；失敗＝fallback（台南市東區） */
+  origin: Coord;
 }
 
 /** 完成行程的分支（spec 2.6） */

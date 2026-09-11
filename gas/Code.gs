@@ -15,6 +15,12 @@
  *   成功  { "success": true,  "data": ... }
  *   失敗  { "success": false, "message": "說明" }
  *   （GAS 沒有真的 HTTP status code，用 success 欄位表示）
+ *
+ * 欄位（Places 分頁）：
+ *   id / userId / storeName / region / category / source / imageUrl / lat / lng / createdAt / visited
+ *   - lat / lng 是「預留欄位」：目前沒有座標來源，前端不會送、後端一律存空值、
+ *     doGet 讀出來是 null。之後接「截圖辨識取得座標」或「地區文字 geocoding」才會真的填。
+ *   - 舊的 Places 分頁如果沒有這兩欄，第一次讀 / 寫時會自動補上標題（見 ensureHeaders_）。
  */
 
 const SHEET_NAME = 'Places';
@@ -27,6 +33,8 @@ const HEADERS = [
   'category',
   'source',
   'imageUrl',
+  'lat',
+  'lng',
   'createdAt',
   'visited',
 ];
@@ -45,15 +53,39 @@ function getSpreadsheet_() {
   return ss;
 }
 
-/** 取得 Places sheet；不存在就建立，並確保有標題列 */
+/**
+ * 確保標題列存在且完整。
+ * - 全新 / 空的 sheet：寫入完整 HEADERS。
+ * - 已有資料但缺欄位（例如舊版沒有 lat / lng）：把缺的欄位「附加到現有標題列尾端」，
+ *   不動既有資料欄位順序，舊資料列在新欄位就是空值。
+ */
+function ensureHeaders_(sheet) {
+  const lastCol = sheet.getLastColumn();
+  if (lastCol === 0 || sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+    sheet.setFrozenRows(1);
+    return;
+  }
+  const current = sheet
+    .getRange(1, 1, 1, lastCol)
+    .getValues()[0]
+    .map(function (h) {
+      return String(h).trim();
+    });
+  const missing = HEADERS.filter(function (h) {
+    return current.indexOf(h) === -1;
+  });
+  if (missing.length) {
+    sheet.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
+  }
+  if (sheet.getFrozenRows() < 1) sheet.setFrozenRows(1);
+}
+
 function getSheet_() {
   const ss = getSpreadsheet_();
   let sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) sheet = ss.insertSheet(SHEET_NAME);
-  if (sheet.getLastRow() < 1) {
-    sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
-    sheet.setFrozenRows(1);
-  }
+  ensureHeaders_(sheet);
   return sheet;
 }
 
@@ -71,24 +103,45 @@ function jsonError_(message) {
   ).setMimeType(ContentService.MimeType.JSON);
 }
 
+/* ─────────────── 型別轉換 ─────────────── */
+
+/** 空值 → null；否則盡量轉數字；轉不動也回 null（不讓前端解析數字時壞掉） */
+function numOrNull_(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  const n = Number(v);
+  return isNaN(n) ? null : n;
+}
+
+/** 存進儲存格用：null / undefined / 空 / 非數字 → 空字串；否則數字 */
+function numOrBlank_(v) {
+  if (v === null || v === undefined || v === '') return '';
+  const n = Number(v);
+  return isNaN(n) ? '' : n;
+}
+
 /* ─────────────── 讀取 ─────────────── */
 
 function readAll_(sheet) {
   const values = sheet.getDataRange().getValues();
   if (values.length < 2) return [];
-  const header = values[0];
+  const header = values[0].map(function (h) {
+    return String(h).trim();
+  });
   const rows = [];
   for (let i = 1; i < values.length; i++) {
     const row = values[i];
     if (row.join('') === '') continue; // 跳過整列空白
     const obj = {};
     for (let c = 0; c < header.length; c++) {
-      obj[String(header[c])] = row[c];
+      if (!header[c]) continue;
+      obj[header[c]] = row[c];
     }
     obj.id = String(obj.id);
     obj.userId = String(obj.userId);
     obj.visited =
       obj.visited === true || String(obj.visited).toLowerCase() === 'true';
+    obj.lat = numOrNull_(obj.lat); // 空欄位 → null
+    obj.lng = numOrNull_(obj.lng);
     if (obj.createdAt instanceof Date) {
       obj.createdAt = obj.createdAt.toISOString();
     } else {
@@ -97,6 +150,22 @@ function readAll_(sheet) {
     rows.push(obj);
   }
   return rows;
+}
+
+/* ─────────────── 寫入（欄位順序照現有標題列，相容舊 sheet） ─────────────── */
+
+function appendRecord_(sheet, record) {
+  const lastCol = sheet.getLastColumn();
+  const header = sheet
+    .getRange(1, 1, 1, lastCol)
+    .getValues()[0]
+    .map(function (h) {
+      return String(h).trim();
+    });
+  const row = header.map(function (h) {
+    return Object.prototype.hasOwnProperty.call(record, h) ? record[h] : '';
+  });
+  sheet.appendRow(row);
 }
 
 /* ─────────────── doGet：清單 ─────────────── */
@@ -161,24 +230,27 @@ function doPost(e) {
       category: category,
       source: source,
       imageUrl: imageUrl,
+      // lat / lng 是可選欄位：前端目前不會送，沒有就存空字串
+      lat: numOrBlank_(body.lat),
+      lng: numOrBlank_(body.lng),
       createdAt: new Date().toISOString(),
       visited: body.visited === true,
     };
 
     const sheet = getSheet_();
-    const rowValues = HEADERS.map(function (h) {
-      return record[h];
-    });
 
     const lock = LockService.getScriptLock();
     lock.waitLock(10000); // Sheets 並發寫入容易鎖住，加鎖保險
     try {
-      sheet.appendRow(rowValues);
+      appendRecord_(sheet, record);
       SpreadsheetApp.flush();
     } finally {
       lock.releaseLock();
     }
 
+    // 回傳給前端的格式：空值一律回 null
+    record.lat = numOrNull_(record.lat);
+    record.lng = numOrNull_(record.lng);
     return jsonOk_(record);
   } catch (err) {
     return jsonError_('寫入失敗：' + (err && err.message ? err.message : err));

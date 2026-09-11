@@ -5,7 +5,12 @@
 ## 1. 建立試算表與腳本
 
 1. 到 Google Drive 新增一個 **Google Sheet**（名字隨意，例如 `yoxi-db`）。
-   - **不用**手動建 `Places` 分頁，第一次寫入時腳本會自動建立並補上標題列。
+   - **不用**手動建 `Places` 分頁，第一次讀 / 寫時腳本會自動建立並補上標題列。
+   - 標題列欄位：
+     `id / userId / storeName / region / category / source / imageUrl / lat / lng / createdAt / visited`
+   - 如果你之前已經用舊版（沒有 `lat` / `lng`）建過 `Places`，**不用手動改**：
+     腳本第一次執行時偵測到缺欄位，會自動把 `lat` / `lng` 補到標題列尾端，
+     舊資料列這兩欄留空，不會噴錯。
 2. 在這張 Sheet 裡：**擴充功能 (Extensions) → Apps Script**。
    > 一定要從 Sheet 裡開，腳本才會「附加」在這張試算表上，
    > `SpreadsheetApp.getActiveSpreadsheet()` 才抓得到。
@@ -53,7 +58,19 @@ const DEPLOYED_API_URL = 'https://script.google.com/macros/s/AKfycb....../exec';
 - **寫**：在 App 裡走「想去的地方 → ＋ → 上傳截圖 → 開始 AI 辨識 → 儲存」，
   回到清單看得到新項目，且 Google Sheet 的 `Places` 分頁多一列。
 
-## 5. 之後改 Code.gs 怎麼重新部署
+## 5. 關於 lat / lng 欄位
+
+`lat` / `lng` 目前是**預留欄位**：
+
+- 前端這次**不會**送座標值（還沒有座標來源）。
+- 後端收到沒帶 `lat` / `lng` 就存成空儲存格；`doGet` 讀出來會是 `null`。
+- 實際的座標值要等之後接這類功能才會真的填入：
+  - 「截圖辨識（VLM）時順便取得座標」，或
+  - 「依 `region` 地區文字做地理編碼（geocoding）」
+- 在那之前，`Places` 分頁裡新增的地點 `lat` / `lng` 一律是空的；
+  前端路線規劃畫面的地點座標暫時仍沿用原型假資料（見 `src/lib/route.ts` 的 `placeCoord`）。
+
+## 6. 之後改 Code.gs 怎麼重新部署
 
 **Deploy → Manage deployments → 選現有的那個 → 鉛筆(編輯) → Version 選「New version」→ Deploy。**
 這樣網址不變，不用再改前端。（若選 New deployment 會產生新網址，要再貼一次。）

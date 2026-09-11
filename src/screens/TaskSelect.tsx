@@ -1,28 +1,29 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import LocationStrip from '../components/LocationStrip';
 import { BottomBar, Button, ScreenScroll, TopBar } from '../components/ui';
 import { MOCK_GPS, MOCK_RECOMMENDATIONS } from '../data/mock';
-import { haversineKm, planRoute } from '../lib/route';
+import { haversineKm, placeCoord, planRoute } from '../lib/route';
 import { useApp } from '../state/AppState';
-import type { Place } from '../types';
+import type { Coord, Place } from '../types';
 
 type Seg = 'saved' | 'rec';
 
 function TaskRow({
   place,
   sub,
+  origin,
   selected,
   onToggle,
 }: {
   place: Place;
   sub: string;
+  origin: Coord;
   selected: boolean;
   onToggle: () => void;
 }) {
   const km =
-    Math.round(
-      haversineKm(MOCK_GPS, { lat: place.lat, lng: place.lng }) * 10,
-    ) / 10;
+    Math.round(haversineKm(origin, placeCoord(place)) * 10) / 10;
   return (
     <button
       type="button"
@@ -51,8 +52,11 @@ function TaskRow({
 
 export default function TaskSelect() {
   const navigate = useNavigate();
-  const { places, selectedPlaceIds, dispatch } = useApp();
+  const { places, selectedPlaceIds, userLocation, dispatch } = useApp();
   const [seg, setSeg] = useState<Seg>('saved');
+
+  // 真實 GPS 座標；還沒定位好或失敗時退回 fallback
+  const origin: Coord = userLocation ?? { lat: MOCK_GPS.lat, lng: MOCK_GPS.lng };
 
   const saved = places.filter((p) => !p.visited);
 
@@ -62,13 +66,17 @@ export default function TaskSelect() {
     if (picked.length === 0) picked = saved.slice(0, 1);
 
     const route = planRoute(
-      picked.map((p) => ({
-        placeId: p.id,
-        name: p.name,
-        meta: `${p.category} · ${p.region}`,
-        lat: p.lat,
-        lng: p.lng,
-      })),
+      picked.map((p) => {
+        const c = placeCoord(p);
+        return {
+          placeId: p.id,
+          name: p.name,
+          meta: `${p.category} · ${p.region}`,
+          lat: c.lat,
+          lng: c.lng,
+        };
+      }),
+      origin,
     );
     dispatch({ type: 'setRoute', route });
     navigate('/route');
@@ -78,9 +86,7 @@ export default function TaskSelect() {
     <>
       <TopBar title="選擇任務地點" back="/home" />
       <ScreenScroll>
-        <div className="mb-4 flex items-center gap-2 rounded-xl bg-teal-soft px-3 py-2.5 text-[12px] font-semibold text-teal">
-          📡 已定位：目前在{MOCK_GPS.label}
-        </div>
+        <LocationStrip label="目前位置" />
 
         <div className="mb-4 flex rounded-[14px] bg-paper-deep p-1">
           {(
@@ -113,6 +119,7 @@ export default function TaskSelect() {
                   key={p.id}
                   place={p}
                   sub={`${p.category} · ${p.region}`}
+                  origin={origin}
                   selected={selectedPlaceIds.includes(p.id)}
                   onToggle={() => dispatch({ type: 'toggleSelected', id: p.id })}
                 />
@@ -122,6 +129,7 @@ export default function TaskSelect() {
                   key={p.id}
                   place={p}
                   sub={`推薦・${p.reason} · ${p.region}`}
+                  origin={origin}
                   selected={selectedPlaceIds.includes(p.id)}
                   onToggle={() => dispatch({ type: 'toggleSelected', id: p.id })}
                 />

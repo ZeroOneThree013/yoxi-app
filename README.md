@@ -7,9 +7,12 @@
 - **PWA**：vite-plugin-pwa（manifest + service worker，可加到主畫面）
 - **樣式**：Tailwind CSS，色彩／字體照 spec 第 5 節設成 theme（`tailwind.config.js`）
 - **地圖**：Leaflet + OpenStreetMap 圖磚 + OSRM demo（路線畫面），失敗時 fallback 直線
+- **定位**：使用者目前位置走真實 `navigator.geolocation`（`src/hooks/useGeolocation.ts`），
+  失敗／被拒／不支援時退回台南市東區預設座標並在畫面上提示
 - **資料**：
   - **「想去的地方」已接後端**：Google Apps Script + Google Sheets（`src/lib/api.ts`、`gas/`）
-  - 其餘功能仍是 mock（`src/data/mock.ts`）
+  - 其餘功能仍是 mock（`src/data/mock.ts`）；各收藏地點的 lat/lng 欄位已加好但值還是空的，
+    路線規劃畫面的地點座標暫時仍用假資料（`src/lib/route.ts` 的 `placeCoord`）
 
 > 後端網址還沒填時，「想去的地方」會自動退回本機 mock（重整會重置），畫面不會壞。
 > 設定方式見 `gas/README.md` 與 `src/config.ts`。

@@ -10,7 +10,8 @@ import {
   TextInput,
   TopBar,
 } from '../components/ui';
-import { MOCK_GPS, QUICK_DESTINATIONS } from '../data/mock';
+import LocationStrip from '../components/LocationStrip';
+import { QUICK_DESTINATIONS } from '../data/mock';
 import { estimateQuickRide } from '../lib/route';
 import { useApp } from '../state/AppState';
 
@@ -45,9 +46,7 @@ export default function QuickRide() {
           不需要規劃行程，輸入目的地直接叫車。
         </p>
 
-        <div className="mb-4 flex items-center gap-2 rounded-xl bg-teal-soft px-3 py-2.5 text-[12px] font-semibold text-teal">
-          📡 上車地點：目前在{MOCK_GPS.label}
-        </div>
+        <LocationStrip label="上車地點" />
 
         <Field label="目的地">
           <TextInput

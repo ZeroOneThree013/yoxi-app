@@ -9,9 +9,8 @@ import {
   TileLayer,
   useMap,
 } from 'react-leaflet';
-import { MOCK_GPS } from '../data/mock';
 import { fetchRoadPath } from '../lib/route';
-import type { PlannedStop } from '../types';
+import type { Coord, PlannedStop } from '../types';
 
 const RED = '#FF210C';
 
@@ -80,8 +79,15 @@ function FitBounds({ points }: { points: [number, number][] }) {
   return null;
 }
 
-export default function RouteMap({ stops }: { stops: PlannedStop[] }) {
-  const user: [number, number] = [MOCK_GPS.lat, MOCK_GPS.lng];
+export default function RouteMap({
+  stops,
+  userLocation,
+}: {
+  stops: PlannedStop[];
+  /** 規劃當下的出發點（route.origin）：真實 GPS 或 fallback */
+  userLocation: Coord;
+}) {
+  const user: [number, number] = [userLocation.lat, userLocation.lng];
   const stopPts = stops
     .filter((s) => !Number.isNaN(s.lat) && !Number.isNaN(s.lng))
     .map((s) => [s.lat, s.lng] as [number, number]);

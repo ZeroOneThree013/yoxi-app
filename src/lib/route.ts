@@ -23,13 +23,39 @@ interface RawStop {
 }
 
 /**
- * mock 版 AI 路線規劃：從目前 GPS 出發，用最近鄰法排出造訪順序。
+ * 取地點座標給「路線地圖 / 距離計算」用。
+ *
+ * ⚠️ 已知下一步工作：Places sheet 已經有 lat / lng 欄位，但目前實際值都是空的
+ *   （還沒有座標來源）。所以這裡在沒有真實座標時，暫時沿用原型的假座標
+ *   ——依 id 把地點打散在「目前位置」附近。之後接「截圖辨識取得座標」或
+ *   「依地區文字做 geocoding」再改成用真實值，屆時就會走上面那個 return。
+ */
+export function placeCoord(place: {
+  id: string;
+  lat?: number | null;
+  lng?: number | null;
+}): Coord {
+  if (typeof place.lat === 'number' && typeof place.lng === 'number') {
+    return { lat: place.lat, lng: place.lng };
+  }
+  const seed = place.id
+    .split('')
+    .reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  return {
+    lat: MOCK_GPS.lat + ((seed % 40) - 20) / 1000,
+    lng: MOCK_GPS.lng + (((seed * 7) % 40) - 20) / 1000,
+  };
+}
+
+/**
+ * mock 版 AI 路線規劃：從 `origin`（使用者目前位置，可能是真實 GPS 或 fallback）
+ * 出發，用最近鄰法排出造訪順序。
  * spec 第 4 節：正式版換成真實 TSP 最佳化 / 距離矩陣。
  */
-export function planRoute(picked: RawStop[]): PlannedRoute {
+export function planRoute(picked: RawStop[], origin: Coord): PlannedRoute {
   const remaining = [...picked];
   const ordered: PlannedStop[] = [];
-  let cursor: Coord = { lat: MOCK_GPS.lat, lng: MOCK_GPS.lng };
+  let cursor: Coord = { lat: origin.lat, lng: origin.lng };
   let totalDist = 0;
 
   while (remaining.length > 0) {
@@ -56,6 +82,7 @@ export function planRoute(picked: RawStop[]): PlannedRoute {
     totalDist: Math.round(totalDist * 10) / 10,
     totalTime,
     totalCost,
+    origin: { lat: origin.lat, lng: origin.lng },
   };
 }
 

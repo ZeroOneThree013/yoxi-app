@@ -52,7 +52,7 @@ export default function RouteScreen() {
     <>
       <TopBar title="AI 規劃路線" back="/plan" />
       <ScreenScroll>
-        <RouteMap stops={stops} />
+        <RouteMap stops={stops} userLocation={route.origin} />
 
         <div className="mb-4 flex gap-2.5">
           {[
