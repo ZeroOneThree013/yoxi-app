@@ -33,7 +33,7 @@
  */
 
 const SHEET_NAME = 'Places';
-const SPREADSHEET_ID = ''; // 留空 = 用「附加在這張 Sheet 上」的試算表
+const SPREADSHEET_ID = '1eB7pOr-a4IlwSoz7YpyY1UnnrMUfQ79PhwiTR11sf4k'; // 留空 = 用「附加在這張 Sheet 上」的試算表
 const HEADERS = [
   'id',
   'userId',
