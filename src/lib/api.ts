@@ -246,7 +246,11 @@ export async function fetchNearbyPois(
         category,
       }),
     },
-    20000, // Overpass 有時查詢比較久，逾時留寬鬆一點
+    // 後端最多依序試 3 個 Overpass 鏡像（見 gas/Code.gs 的 OVERPASS_URLS /
+    // fetchOverpassData_），單一鏡像實測過慢到 26 秒，最壞情況全部試一輪
+    // 可能要 45-60 秒。20 秒太短，前端會在後端還在查的時候就先判定逾時、
+    // 顯示查詢失敗——拉長到 65 秒，留一點超過 60 秒估計值的緩衝。
+    65000,
   );
   const json = await parseJson<ApiResponse<NearbyPoi[]>>(res);
   if (!json.success) throw new Error(json.message || '查詢附近推薦地點失敗');
