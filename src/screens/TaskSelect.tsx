@@ -1,13 +1,18 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import LocationStrip from '../components/LocationStrip';
-import { BottomBar, Button, ScreenScroll, TopBar } from '../components/ui';
-import { MOCK_GPS, MOCK_RECOMMENDATIONS } from '../data/mock';
+import { Button, BottomBar, ScreenScroll, TopBar } from '../components/ui';
+import { MOCK_GPS } from '../data/mock';
 import { haversineKm, placeCoord, planRoute } from '../lib/route';
+import {
+  fetchNearbyRecommendations,
+  pickPreferredCategory,
+} from '../lib/recommendations';
 import { useApp } from '../state/AppState';
-import type { Coord, Place } from '../types';
+import type { Coord, Place, RecommendedPlace } from '../types';
 
 type Seg = 'saved' | 'rec';
+type RecStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 function TaskRow({
   place,
@@ -22,8 +27,7 @@ function TaskRow({
   selected: boolean;
   onToggle: () => void;
 }) {
-  const km =
-    Math.round(haversineKm(origin, placeCoord(place)) * 10) / 10;
+  const km = Math.round(haversineKm(origin, placeCoord(place)) * 10) / 10;
   return (
     <button
       type="button"
@@ -60,8 +64,37 @@ export default function TaskSelect() {
 
   const saved = places.filter((p) => !p.visited);
 
+  // ── 依偏好推薦：真實 GPS + Overpass 查附近真實地點（spec 2.5）
+  const [recStatus, setRecStatus] = useState<RecStatus>('idle');
+  const [recommendations, setRecommendations] = useState<RecommendedPlace[]>(
+    [],
+  );
+  const [recNote, setRecNote] = useState<string | null>(null);
+
+  const loadRecommendations = useCallback(async () => {
+    setRecStatus('loading');
+    try {
+      const { category, isFallback } = pickPreferredCategory(places);
+      const list = await fetchNearbyRecommendations(origin, category);
+      setRecommendations(list);
+      setRecNote(isFallback ? '還沒收藏足夠資料，暫時顯示熱門類型' : null);
+      setRecStatus('ready');
+    } catch {
+      // 查詢失敗 / 逾時：清空清單、顯示乾淨的失敗狀態，不 fallback 回假地點
+      setRecommendations([]);
+      setRecStatus('error');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [places, origin.lat, origin.lng]);
+
+  useEffect(() => {
+    if (seg === 'rec' && recStatus === 'idle') {
+      void loadRecommendations();
+    }
+  }, [seg, recStatus, loadRecommendations]);
+
   const plan = () => {
-    const all: Place[] = [...places, ...MOCK_RECOMMENDATIONS];
+    const all: Place[] = [...places, ...recommendations];
     let picked = all.filter((p) => selectedPlaceIds.includes(p.id));
     if (picked.length === 0) picked = saved.slice(0, 1);
 
@@ -112,29 +145,72 @@ export default function TaskSelect() {
           可複選多個地點，AI 會依目前位置規劃最佳順序
         </p>
 
-        <div className="mb-4 rounded-2xl border border-line bg-card px-3">
-          {seg === 'saved'
-            ? saved.map((p) => (
-                <TaskRow
-                  key={p.id}
-                  place={p}
-                  sub={`${p.category} · ${p.region}`}
-                  origin={origin}
-                  selected={selectedPlaceIds.includes(p.id)}
-                  onToggle={() => dispatch({ type: 'toggleSelected', id: p.id })}
-                />
-              ))
-            : MOCK_RECOMMENDATIONS.map((p) => (
-                <TaskRow
-                  key={p.id}
-                  place={p}
-                  sub={`推薦・${p.reason} · ${p.region}`}
-                  origin={origin}
-                  selected={selectedPlaceIds.includes(p.id)}
-                  onToggle={() => dispatch({ type: 'toggleSelected', id: p.id })}
-                />
-              ))}
-        </div>
+        {seg === 'rec' && recNote && (
+          <p className="mb-2.5 text-[11px] text-muted">{recNote}</p>
+        )}
+
+        {seg === 'rec' && recStatus === 'loading' && (
+          <div className="mb-4 space-y-2 rounded-2xl border border-line bg-card p-3">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="h-[52px] animate-pulse rounded-xl bg-paper-deep/60"
+              />
+            ))}
+          </div>
+        )}
+
+        {seg === 'rec' && recStatus === 'error' && (
+          <div className="mb-4 rounded-2xl border border-line bg-[#F9DED5] p-4 text-[12.5px] text-red-deep">
+            <p className="mb-3 leading-relaxed">
+              推薦地點查詢失敗，請稍後再試。
+            </p>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setRecStatus('idle');
+              }}
+            >
+              重新查詢
+            </Button>
+          </div>
+        )}
+
+        {seg === 'rec' && recStatus === 'ready' && recommendations.length === 0 && (
+          <div className="mb-4 rounded-2xl border border-line bg-card p-4 text-center text-[12.5px] leading-relaxed text-muted">
+            附近暫時沒有符合偏好的推薦地點
+          </div>
+        )}
+
+        {(seg === 'saved' || (seg === 'rec' && recommendations.length > 0)) && (
+          <div className="mb-4 rounded-2xl border border-line bg-card px-3">
+            {seg === 'saved'
+              ? saved.map((p) => (
+                  <TaskRow
+                    key={p.id}
+                    place={p}
+                    sub={`${p.category} · ${p.region}`}
+                    origin={origin}
+                    selected={selectedPlaceIds.includes(p.id)}
+                    onToggle={() => dispatch({ type: 'toggleSelected', id: p.id })}
+                  />
+                ))
+              : recommendations.map((p) => (
+                  <TaskRow
+                    key={p.id}
+                    place={p}
+                    sub={
+                      p.region
+                        ? `推薦・${p.reason} · ${p.region}`
+                        : `推薦・${p.reason}`
+                    }
+                    origin={origin}
+                    selected={selectedPlaceIds.includes(p.id)}
+                    onToggle={() => dispatch({ type: 'toggleSelected', id: p.id })}
+                  />
+                ))}
+          </div>
+        )}
 
         <div className="flex items-center justify-between rounded-[14px] bg-ink px-4 py-3 text-[12.5px] font-bold text-white">
           <span>

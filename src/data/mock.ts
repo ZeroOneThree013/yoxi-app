@@ -1,10 +1,4 @@
-import type {
-  DailyTask,
-  Place,
-  Profile,
-  QuizAnswer,
-  RecommendedPlace,
-} from '../types';
+import type { DailyTask, Place, Profile, QuizAnswer } from '../types';
 
 // ── 台南市東區座標（原型寫死的假 GPS）。
 // 使用者目前位置現在走真實 Geolocation（見 hooks/useGeolocation.ts）；
@@ -89,42 +83,9 @@ export const MOCK_PLACES: Place[] = [
   },
 ];
 
-// ── 依偏好推薦（spec 2.5 segment「依偏好推薦」）
-export const MOCK_RECOMMENDATIONS: RecommendedPlace[] = [
-  {
-    id: 'r1',
-    name: '本町咖啡吧',
-    region: '台南市中西區',
-    category: '咖啡廳',
-    source: 'yoxi 推薦',
-    reason: '咖啡廳偏好',
-    lat: 22.9944,
-    lng: 120.1996,
-    visited: false,
-  },
-  {
-    id: 'r2',
-    name: '神農街選物所',
-    region: '台南市中西區',
-    category: '選物 / 逛街',
-    source: 'yoxi 推薦',
-    reason: '逛街偏好',
-    lat: 22.9975,
-    lng: 120.1958,
-    visited: false,
-  },
-  {
-    id: 'r3',
-    name: '安平海邊咖啡',
-    region: '台南市安平區',
-    category: '咖啡廳',
-    source: 'yoxi 推薦',
-    reason: '想去海邊 · 咖啡廳偏好',
-    lat: 23.0011,
-    lng: 120.1601,
-    visited: false,
-  },
-];
+// 依偏好推薦（spec 2.5 segment「依偏好推薦」）已改真實資料：
+// 見 src/lib/recommendations.ts + gas/Code.gs 的 handleRecommendPlaces_
+// （真實 GPS + Overpass API 查附近地點，不再用這裡的寫死清單）。
 
 // ── 徽章牆（spec 2.3 任務二：節氣・季節限定，共 6 枚）
 export const MOCK_BADGES = [

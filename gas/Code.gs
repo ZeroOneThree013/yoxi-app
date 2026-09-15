@@ -9,10 +9,12 @@
  *
  * 端點：
  *   GET  ?userId=demo-user                        → 回傳該 user 的所有收藏地點（新到舊）
- *   POST body = JSON 物件（無 action / action 不是
- *        'recognizePlace'）                        → 新增一筆收藏地點
+ *   POST body = JSON 物件（無 action，或 action
+ *        不是下面兩種）                            → 新增一筆收藏地點
  *   POST body = { action: 'recognizePlace',
  *        imageBase64, mimeType }                   → 呼叫 Gemini 辨識截圖，回傳結構化欄位
+ *   POST body = { action: 'recommendPlaces',
+ *        lat, lng, category }                      → 呼叫 Overpass 查附近符合類別的真實地點
  *
  * 回應一律 JSON：
  *   成功  { "success": true,  "data": ... }
@@ -87,6 +89,21 @@ const RECOGNIZE_RETRY_DELAYS_MS = [600, 1500];
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 const NOMINATIM_USER_AGENT =
   'yoxi-app/1.0 (hackathon demo; https://github.com/ZeroOneThree013/yoxi-app)';
+
+// ── 依偏好推薦（Overpass API / OpenStreetMap，免費，不需要金鑰）設定 ─────────
+// spec 原本規劃放前端直接呼叫（Overpass 官方沒有像 Nominatim 那樣強制要求
+// User-Agent，理論上瀏覽器可以直接打）。但實測時這個環境對 overpass-api.de
+// 的請求一律被擋（連最簡單的 GET /api/status 都回 406，Nominatim 走的是同一個
+// OSM 生態圈卻完全正常，判斷是 Overpass 的防濫用機制擋掉了這個環境的出口 IP）。
+// 沒辦法從瀏覽器端驗證 CORS 是否真的可行，保險起見改放後端呼叫，做法比照
+// 地理編碼：GAS 的出口 IP 比較不會被這類公開服務的防濫用機制擋掉。
+const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+const OVERPASS_RADIUS_M = 4000; // 3-5 公里，取中間值
+const OVERPASS_USER_AGENT =
+  'yoxi-app/1.0 (hackathon demo; https://github.com/ZeroOneThree013/yoxi-app)';
+// Overpass 查回來的 POI 上限（排序 / 取前幾筆交給前端 lib/recommendations.ts，
+// 這裡只是避免回應太肥）
+const OVERPASS_MAX_RESULTS = 20;
 
 const RECOGNIZE_PROMPT = [
   '你是一個從社群媒體或地圖 App 的手機截圖中擷取地點資訊的助理。',
@@ -274,6 +291,9 @@ function doPost(e) {
 
     if (body.action === 'recognizePlace') {
       return handleRecognizePlace_(body);
+    }
+    if (body.action === 'recommendPlaces') {
+      return handleRecommendPlaces_(body);
     }
     return handleCreatePlace_(body);
   } catch (err) {
@@ -590,6 +610,140 @@ function sanitizeLatLng_(latRaw, lngRaw) {
     return { lat: null, lng: null };
   }
   return { lat: lat, lng: lng };
+}
+
+/* ─────────────── 依偏好推薦（Overpass API） ─────────────── */
+
+/**
+ * 把（Gemini 辨識出來的自由文字）類別對應到 Overpass 查詢用的 OSM tag。
+ * 對照不到的類別一律用 amenity=cafe 當合理預設。
+ */
+function categoryToOsmTag_(category) {
+  const c = String(category || '');
+  if (c.indexOf('咖啡') !== -1) return { key: 'amenity', value: 'cafe' };
+  if (
+    c.indexOf('餐廳') !== -1 ||
+    c.indexOf('美食') !== -1 ||
+    c.indexOf('燒肉') !== -1 ||
+    c.indexOf('小吃') !== -1
+  ) {
+    return { key: 'amenity', value: 'restaurant' };
+  }
+  if (c.indexOf('甜') !== -1 || c.indexOf('冰') !== -1) {
+    return { key: 'amenity', value: 'ice_cream' };
+  }
+  if (c.indexOf('海') !== -1) return { key: 'natural', value: 'beach' };
+  if (
+    c.indexOf('戶外') !== -1 ||
+    c.indexOf('走走') !== -1 ||
+    c.indexOf('公園') !== -1
+  ) {
+    return { key: 'leisure', value: 'park' };
+  }
+  if (
+    c.indexOf('逛街') !== -1 ||
+    c.indexOf('選物') !== -1 ||
+    c.indexOf('購物') !== -1
+  ) {
+    return { key: 'shop', value: null }; // value 是 null = 只要有 shop 這個 tag 就算，不限種類
+  }
+  return { key: 'amenity', value: 'cafe' };
+}
+
+/** 組 Overpass QL：查 node/way，半徑 OVERPASS_RADIUS_M 內符合 tag 的地點 */
+function buildOverpassQuery_(tag, lat, lng) {
+  const filter = tag.value
+    ? '["' + tag.key + '"="' + tag.value + '"]'
+    : '["' + tag.key + '"]';
+  const around = '(around:' + OVERPASS_RADIUS_M + ',' + lat + ',' + lng + ')';
+  return (
+    '[out:json][timeout:20];' +
+    '(node' +
+    filter +
+    around +
+    ';way' +
+    filter +
+    around +
+    ';);' +
+    'out center ' +
+    OVERPASS_MAX_RESULTS +
+    ';'
+  );
+}
+
+function handleRecommendPlaces_(body) {
+  try {
+    const lat = Number(body.lat);
+    const lng = Number(body.lng);
+    const category = body.category ? String(body.category).trim() : '';
+    if (isNaN(lat) || isNaN(lng)) {
+      return jsonError_('缺少或不合法的 lat / lng');
+    }
+
+    const tag = categoryToOsmTag_(category);
+    const query = buildOverpassQuery_(tag, lat, lng);
+
+    let res;
+    try {
+      res = UrlFetchApp.fetch(OVERPASS_URL, {
+        method: 'post',
+        contentType: 'application/x-www-form-urlencoded',
+        headers: { 'User-Agent': OVERPASS_USER_AGENT },
+        payload: 'data=' + encodeURIComponent(query),
+        muteHttpExceptions: true,
+      });
+    } catch (fetchErr) {
+      return jsonError_(
+        '呼叫 Overpass API 失敗：' +
+          (fetchErr && fetchErr.message ? fetchErr.message : fetchErr),
+      );
+    }
+
+    const code = res.getResponseCode();
+    if (code !== 200) {
+      return jsonError_('Overpass API 回應異常（HTTP ' + code + '）');
+    }
+
+    let data;
+    try {
+      data = JSON.parse(res.getContentText());
+    } catch (parseErr) {
+      return jsonError_('Overpass API 回應不是合法 JSON');
+    }
+
+    const elements = (data && data.elements) || [];
+    const pois = [];
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i];
+      const tags = el.tags || {};
+      if (!tags.name) continue; // 沒有名字的 POI 對使用者沒意義，跳過
+
+      const elLat = el.lat != null ? el.lat : el.center && el.center.lat;
+      const elLng = el.lon != null ? el.lon : el.center && el.center.lon;
+      if (elLat == null || elLng == null) continue;
+
+      const addressParts = [
+        tags['addr:city'],
+        tags['addr:district'] || tags['addr:suburb'],
+      ].filter(function (s) {
+        return s;
+      });
+
+      pois.push({
+        id: 'osm_' + el.type + '_' + el.id,
+        name: String(tags.name),
+        lat: elLat,
+        lng: elLng,
+        address: addressParts.join(''),
+      });
+    }
+
+    return jsonOk_(pois);
+  } catch (err) {
+    return jsonError_(
+      '查詢附近推薦地點失敗：' + (err && err.message ? err.message : err),
+    );
+  }
 }
 
 function testAuth() {

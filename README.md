@@ -18,6 +18,10 @@
     OpenStreetMap 免費服務，放在 GAS 端呼叫以符合其 User-Agent 規範）→ 截圖辨識時
     Gemini 順便估算的大概座標 → 都沒有就留空。路線規劃畫面優先用實值，沒有才 fallback
     回原型假座標（`src/lib/route.ts` 的 `placeCoord`），詳見 `gas/README.md` 第 7 節
+  - **「依偏好推薦」已接真實資料**：統計收藏地點裡最常見的類別 → 後端呼叫
+    **Overpass API**（OpenStreetMap 免費 POI 查詢）查真實 GPS 附近符合類別的地點 →
+    前端用既有的距離計算排序取最近幾筆；查詢失敗或查無結果顯示乾淨的空狀態，
+    **不 fallback 回假地點**（`src/lib/recommendations.ts`，詳見 `gas/README.md` 第 8 節）
   - 其餘功能仍是 mock（`src/data/mock.ts`）
 
 > 後端網址還沒填時，「想去的地方」會自動退回本機 mock（重整會重置）；
@@ -66,7 +70,7 @@ npm run preview  # 本機預覽 build 結果
 
 ## 後端串接（想去的地方）
 
-- API 層：`src/lib/api.ts`（`fetchPlaces` / `createPlace` / `recognizePlace`）
+- API 層：`src/lib/api.ts`（`fetchPlaces` / `createPlace` / `recognizePlace` / `fetchNearbyPois`）
 - 設定：`src/config.ts` 的 `API_BASE_URL`（或環境變數 `VITE_API_BASE_URL`）
 - 後端程式與部署步驟：`gas/Code.gs`、`gas/README.md`
 - Google Sheets 分頁 `Places`，欄位：
@@ -75,6 +79,8 @@ npm run preview  # 本機預覽 build 結果
   見 `gas/README.md`）
 - POST 用 `Content-Type: text/plain` 避開 CORS preflight（spec 6.2）
 - 截圖辨識：`doPost` body 帶 `action: 'recognizePlace'` 時改呼叫 Gemini API
+- 依偏好推薦：`doPost` body 帶 `action: 'recommendPlaces'` 時改呼叫 Overpass API
+  （`src/lib/recommendations.ts` 負責偏好類別統計 + 距離排序）
   （金鑰放 GAS 的 Script Properties，不寫死在程式碼），其餘 `doPost` 走新增地點邏輯
 
 ## 部署到 GitHub Pages

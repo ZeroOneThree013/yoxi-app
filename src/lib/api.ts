@@ -1,6 +1,6 @@
 import { API_BASE_URL, DEMO_USER_ID } from '../config';
 import { MOCK_PLACES } from '../data/mock';
-import type { Place } from '../types';
+import type { Coord, Place } from '../types';
 
 /**
  * API 層：把對 Google Apps Script 的 fetch 呼叫包起來。
@@ -55,6 +55,16 @@ export interface RecognizedPlace {
   /** Gemini 依世界知識估算的大概座標；認不出來就是 null，不要硬湊 */
   lat: number | null;
   lng: number | null;
+}
+
+/** Overpass 查到的一個真實 POI（後端回傳格式，對應 spec 2.5「依偏好推薦」） */
+export interface NearbyPoi {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  /** 最好情況下的地址片段（依 OSM addr:* 標籤組出來），查不到就是空字串 */
+  address: string;
 }
 
 type ApiResponse<T> =
@@ -205,5 +215,40 @@ export async function recognizePlace(
   );
   const json = await parseJson<ApiResponse<RecognizedPlace>>(res);
   if (!json.success) throw new Error(json.message || '辨識失敗，請手動填寫');
+  return json.data;
+}
+
+/**
+ * 查使用者附近符合偏好類別的真實地點（對應「選擇任務地點」畫面的
+ * 「依偏好推薦」分頁，spec 2.5）。後端用 Overpass API（OpenStreetMap）查詢，
+ * 這裡只負責把結果拿回來——distance 排序、reason 文案由 lib/recommendations.ts
+ * 處理（避免重複實作距離計算）。
+ *
+ * 查詢失敗 / 逾時就丟錯，呼叫端要顯示乾淨的失敗或空狀態，
+ * **不可以** fallback 回任何寫死的假地點。
+ */
+export async function fetchNearbyPois(
+  origin: Coord,
+  category: string,
+): Promise<NearbyPoi[]> {
+  if (!isConfigured()) {
+    throw new Error('尚未設定後端網址（依偏好推薦需要透過後端查詢附近地點）');
+  }
+  const res = await request(
+    API_BASE_URL,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'recommendPlaces',
+        lat: origin.lat,
+        lng: origin.lng,
+        category,
+      }),
+    },
+    20000, // Overpass 有時查詢比較久，逾時留寬鬆一點
+  );
+  const json = await parseJson<ApiResponse<NearbyPoi[]>>(res);
+  if (!json.success) throw new Error(json.message || '查詢附近推薦地點失敗');
   return json.data;
 }

@@ -4,10 +4,11 @@
 
 > 已經部署過的人：`Code.gs` 這次新增了「截圖辨識」功能（呼叫 Gemini API），
 > 辨識結果現在也會**順便估算地點座標**存進 `lat` / `lng`，新增地點時後端還會
-> 額外查一次 **Nominatim 地理編碼**修正座標（見第 7 節）——不用另外申請金鑰，
-> Nominatim 是免費、不用註冊的服務。
+> 額外查一次 **Nominatim 地理編碼**修正座標（見第 7 節），「依偏好推薦」分頁也
+> 改成呼叫 **Overpass API** 查真實地點（見第 8 節）——Nominatim 跟 Overpass
+> 都不用另外申請金鑰，是免費、不用註冊的服務。
 > 把新版內容貼回 Apps Script 編輯器覆蓋舊的 `Code.gs`，做第 3 節設定 Gemini 金鑰，
-> 再照第 8 節「Manage deployments → New version → Deploy」重新部署（網址不變，
+> 再照第 9 節「Manage deployments → New version → Deploy」重新部署（網址不變，
 > 前端 `src/config.ts` 不用改）。
 
 ## 1. 建立試算表與腳本
@@ -154,7 +155,45 @@ header，所以地理編碼查詢刻意放在後端做（`geocodePlace_`），�
 - 路線規劃畫面（`src/lib/route.ts` 的 `placeCoord`）會優先用地點自己的 `lat` / `lng`；
   真的沒有實值時才 fallback 回原型的假座標，地圖不會因此空白或壞掉。
 
-## 8. 之後改 Code.gs 怎麼重新部署
+## 8. 「依偏好推薦」：Overpass API 查真實地點
+
+「選擇任務地點」畫面的「依偏好推薦」分頁，改成真的查使用者附近的地點，不再是寫死的
+台南假資料：
+
+1. **偏好類別**：前端統計使用者收藏地點裡最常見的 `category`；收藏是空的、或每個
+   類別都只出現一次（看不出明顯偏好），就用預設類別「咖啡廳」，畫面上會顯示
+   「還沒收藏足夠資料，暫時顯示熱門類型」的小提示。
+2. **查真實地點**：後端 `handleRecommendPlaces_`（`doPost` 帶
+   `{ action: 'recommendPlaces', lat, lng, category }`）把類別對應到 OSM tag
+   （`categoryToOsmTag_`，例如「咖啡」→ `amenity=cafe`、「逛街／選物」→ `shop=*`，
+   對照不到的類別預設 `amenity=cafe`），用使用者真實 GPS 座標查
+   [Overpass API](https://overpass-api.de/)（OpenStreetMap 的免費 POI 查詢服務，
+   半徑 `OVERPASS_RADIUS_M`，預設 4 公里），回傳有名字的真實地點（未命名的 POI
+   會被濾掉，因為顯示給使用者看沒意義）。
+3. **距離排序**：後端只回傳查到的地點原始清單（最多 `OVERPASS_MAX_RESULTS` 筆，
+   未排序），前端 `src/lib/recommendations.ts` 用既有的 `haversineKm`（跟「已存未去」
+   分頁同一個距離計算函式）依真實距離排序、取最近的前幾筆。
+4. **失敗處理**：Overpass 查詢失敗、逾時、或附近真的查無符合類別的地點，
+   畫面會顯示「推薦地點查詢失敗，請稍後再試」或「附近暫時沒有符合偏好的推薦地點」，
+   **不會 fallback 回任何寫死的假地點**——這是刻意的設計，寧可讓使用者看到清楚的
+   空狀態，也不要顯示一個看起來正常、實際上位置離譜的假地點。
+
+### 為什麼放後端（GAS），不是前端直接呼叫 Overpass
+
+原本評估可以像 Nominatim 一樣放前端直接呼叫——Overpass 官方沒有像 Nominatim 那樣
+強制要求 User-Agent，理論上瀏覽器可以直接打。但實際測試時，這個開發環境對
+`overpass-api.de` 的請求**一律被擋**（連最簡單的 `GET /api/status` 都回
+`406 Not Acceptable`；同一個環境打 Nominatim 卻完全正常，兩個服務同屬 OSM 生態圈，
+所以研判是 Overpass 自己的防濫用機制擋掉了這個環境的出口 IP，不是 Overpass 本身
+不能被瀏覽器呼叫）。
+
+因為沒辦法在這個環境驗證前端直接呼叫是否可行（CORS 是否放行、會不會被擋），
+保險起見改放後端呼叫，做法比照地理編碼：GAS 的出口 IP 屬於 Google 的雲端基礎設施，
+一般不會被這類公開服務的防濫用機制擋掉。**如果你在正式環境測試後發現前端直接呼叫
+Overpass 完全沒問題，這段邏輯之後可以考慮搬回前端**，把 GAS 那趟網路請求省下來；
+目前先求穩定能動。
+
+## 9. 之後改 Code.gs 怎麼重新部署
 
 **Deploy → Manage deployments → 選現有的那個 → 鉛筆(編輯) → Version 選「New version」→ Deploy。**
 這樣網址不變，不用再改前端。（若選 New deployment 會產生新網址，要再貼一次。）
@@ -171,6 +210,8 @@ header，所以地理編碼查詢刻意放在後端做（`geocodePlace_`），�
 | 辨識一直回「Gemini API 額度已用完...（HTTP 429）」 | 免費額度用完或太頻繁，去 AI Studio 確認額度，或稍後再試（429 不會自動重試，重刷沒用要等） |
 | 辨識回「Gemini API 回應異常（已重試 2 次）（HTTP 503）」 | 免費層過載，連重試 3 次都沒排到；通常是短暫的，晚一點再上傳一次同一張截圖即可 |
 | 辨識一直回「辨識失敗，請手動填寫」 | 通常是 Gemini 沒回乾淨 JSON（已有防呆解析仍失敗），或圖片內容真的看不出地點；手動填寫即可，不影響儲存 |
-| 改了 `Code.gs` 但辨識行為沒變 | 忘記重新部署，見第 8 節「Manage deployments → New version」 |
+| 改了 `Code.gs` 但辨識行為沒變 | 忘記重新部署，見第 9 節「Manage deployments → New version」 |
+| 「依偏好推薦」一直顯示「推薦地點查詢失敗」 | 檢查 Overpass 服務本身有沒有問題（`overpass-api.de` 官方有時會過載）；也可能是還沒重新部署新版 `Code.gs`（舊版不認得 `recommendPlaces` 這個 action） |
+| 「依偏好推薦」一直顯示「附近暫時沒有符合偏好的推薦地點」 | 正常情況：附近真的沒有符合類別的 OSM 資料，或半徑（`OVERPASS_RADIUS_M`）太小；郊區 / 資料稀疏地區比較容易發生 |
 | 存的地點 `coordSource` 一直是 `estimated` 或空字串，沒有 `geocoded` | 正常情況：Nominatim 查無結果就會這樣。可以查 Executions 的 log 看是「查無結果」還是「查詢失敗」；店名 + 地區文字太模糊、或地點根本沒被 OSM 收錄都會查不到 |
 | 存新地點變得比較慢 | 預期中的，因為多打一次 Nominatim；GAS 沒有逾時控制，查詢失敗一樣會 fallback，不會卡死，只是這次請求會多等一下 |
