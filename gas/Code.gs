@@ -97,7 +97,20 @@ const NOMINATIM_USER_AGENT =
 // OSM 生態圈卻完全正常，判斷是 Overpass 的防濫用機制擋掉了這個環境的出口 IP）。
 // 沒辦法從瀏覽器端驗證 CORS 是否真的可行，保險起見改放後端呼叫，做法比照
 // 地理編碼：GAS 的出口 IP 比較不會被這類公開服務的防濫用機制擋掉。
-const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+//
+// 後來連 GAS 自己的出口 IP（Google 雲端）也被 overpass-api.de 擋了
+// （UrlFetchApp 直接丟「無法開啟網址」的例外）。Overpass 是社群維運的免費
+// 服務，沒有官方 SLA，個別鏡像站隨時可能限制特定來源 IP 或暫時不穩，
+// 所以這裡改成「多鏡像依序容錯」：依序嘗試 OVERPASS_URLS 清單，
+// 連線失敗或回應格式不對就換下一個，全部都失敗才真的回錯誤給前端。
+// 如果哪天這幾個鏡像全部都不能用了，去
+// https://wiki.openstreetmap.org/wiki/Overpass_API#Public_Overpass_API_instances
+// 找目前還在維運的鏡像站，加進這個陣列即可，不用動下面的重試邏輯。
+const OVERPASS_URLS = [
+  'https://overpass.kumi.systems/api/interpreter', // 已用測試函式驗證 GAS 連得上（回 200），排第一個
+  'https://overpass-api.de/api/interpreter', // 官方主站；目前擋 GAS 的出口 IP，當備援保留，也許之後解除限制
+  'https://overpass.openstreetmap.ru/api/interpreter', // 另一個社群維運的公開鏡像，當第三順位備援
+];
 const OVERPASS_RADIUS_M = 4000; // 3-5 公里，取中間值
 const OVERPASS_USER_AGENT =
   'yoxi-app/1.0 (hackathon demo; https://github.com/ZeroOneThree013/yoxi-app)';
@@ -671,6 +684,64 @@ function buildOverpassQuery_(tag, lat, lng) {
   );
 }
 
+/**
+ * 依序嘗試 OVERPASS_URLS 清單裡的每個鏡像，直到有一個成功回傳可用的資料。
+ * 「成功」＝ HTTP 200 + 回應是合法 JSON + 有 elements 陣列；連線失敗、非 200、
+ * JSON 壞掉、格式不對，都算這個鏡像失敗，換下一個試。
+ * 全部鏡像都失敗回傳 null——呼叫端只需要顯示一個籠統的失敗訊息，
+ * 不用列出每個鏡像個別的失敗原因（避免訊息太長）。
+ * 每個鏡像的成功 / 失敗都會寫 Logger.log，方便到 Executions 頁面除錯。
+ */
+function fetchOverpassData_(query) {
+  const options = {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    headers: { 'User-Agent': OVERPASS_USER_AGENT },
+    payload: 'data=' + encodeURIComponent(query),
+    muteHttpExceptions: true,
+  };
+
+  for (let i = 0; i < OVERPASS_URLS.length; i++) {
+    const url = OVERPASS_URLS[i];
+    let res;
+    try {
+      res = UrlFetchApp.fetch(url, options);
+    } catch (fetchErr) {
+      Logger.log(
+        'Overpass 鏡像連線失敗（' +
+          url +
+          '）：' +
+          (fetchErr && fetchErr.message ? fetchErr.message : fetchErr),
+      );
+      continue;
+    }
+
+    const code = res.getResponseCode();
+    if (code !== 200) {
+      Logger.log('Overpass 鏡像回應異常（' + url + '）：HTTP ' + code);
+      continue;
+    }
+
+    let data;
+    try {
+      data = JSON.parse(res.getContentText());
+    } catch (parseErr) {
+      Logger.log('Overpass 鏡像回應不是合法 JSON（' + url + '）');
+      continue;
+    }
+
+    if (!data || !Array.isArray(data.elements)) {
+      Logger.log('Overpass 鏡像回應格式不對，缺少 elements（' + url + '）');
+      continue;
+    }
+
+    Logger.log('Overpass 查詢成功，使用鏡像：' + url);
+    return data;
+  }
+
+  return null; // 全部鏡像都失敗
+}
+
 function handleRecommendPlaces_(body) {
   try {
     const lat = Number(body.lat);
@@ -683,35 +754,12 @@ function handleRecommendPlaces_(body) {
     const tag = categoryToOsmTag_(category);
     const query = buildOverpassQuery_(tag, lat, lng);
 
-    let res;
-    try {
-      res = UrlFetchApp.fetch(OVERPASS_URL, {
-        method: 'post',
-        contentType: 'application/x-www-form-urlencoded',
-        headers: { 'User-Agent': OVERPASS_USER_AGENT },
-        payload: 'data=' + encodeURIComponent(query),
-        muteHttpExceptions: true,
-      });
-    } catch (fetchErr) {
-      return jsonError_(
-        '呼叫 Overpass API 失敗：' +
-          (fetchErr && fetchErr.message ? fetchErr.message : fetchErr),
-      );
+    const data = fetchOverpassData_(query);
+    if (!data) {
+      return jsonError_('所有地圖資料來源都連線失敗，請稍後再試');
     }
 
-    const code = res.getResponseCode();
-    if (code !== 200) {
-      return jsonError_('Overpass API 回應異常（HTTP ' + code + '）');
-    }
-
-    let data;
-    try {
-      data = JSON.parse(res.getContentText());
-    } catch (parseErr) {
-      return jsonError_('Overpass API 回應不是合法 JSON');
-    }
-
-    const elements = (data && data.elements) || [];
+    const elements = data.elements || [];
     const pois = [];
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i];

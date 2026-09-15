@@ -169,11 +169,12 @@ header，所以地理編碼查詢刻意放在後端做（`geocodePlace_`），�
    對照不到的類別預設 `amenity=cafe`），用使用者真實 GPS 座標查
    [Overpass API](https://overpass-api.de/)（OpenStreetMap 的免費 POI 查詢服務，
    半徑 `OVERPASS_RADIUS_M`，預設 4 公里），回傳有名字的真實地點（未命名的 POI
-   會被濾掉，因為顯示給使用者看沒意義）。
+   會被濾掉，因為顯示給使用者看沒意義）。實際查詢會依序嘗試 `OVERPASS_URLS`
+   清單裡的多個鏡像站，見下方「多鏡像容錯」。
 3. **距離排序**：後端只回傳查到的地點原始清單（最多 `OVERPASS_MAX_RESULTS` 筆，
    未排序），前端 `src/lib/recommendations.ts` 用既有的 `haversineKm`（跟「已存未去」
    分頁同一個距離計算函式）依真實距離排序、取最近的前幾筆。
-4. **失敗處理**：Overpass 查詢失敗、逾時、或附近真的查無符合類別的地點，
+4. **失敗處理**：所有鏡像都連線失敗、或附近真的查無符合類別的地點，
    畫面會顯示「推薦地點查詢失敗，請稍後再試」或「附近暫時沒有符合偏好的推薦地點」，
    **不會 fallback 回任何寫死的假地點**——這是刻意的設計，寧可讓使用者看到清楚的
    空狀態，也不要顯示一個看起來正常、實際上位置離譜的假地點。
@@ -193,6 +194,37 @@ header，所以地理編碼查詢刻意放在後端做（`geocodePlace_`），�
 Overpass 完全沒問題，這段邏輯之後可以考慮搬回前端**，把 GAS 那趟網路請求省下來；
 目前先求穩定能動。
 
+### 多鏡像容錯
+
+結果放後端也不保險——**連 GAS 自己的出口 IP 都被 `overpass-api.de` 擋了**
+（`UrlFetchApp.fetch` 直接丟「無法開啟網址」的例外，不是回應碼異常，是連線
+本身被拒絕）。用測試函式換過幾個網址後，確認 `overpass.kumi.systems` 這個鏡像
+GAS 連得上（回 200）。
+
+Overpass 是**社群維運的免費服務，沒有官方 SLA**：個別鏡像站隨時可能限制特定
+來源 IP、暫時過載、或維護中斷線，單押一個網址不夠穩。所以 `handleRecommendPlaces_`
+改成「多鏡像依序容錯」（`fetchOverpassData_`）：
+
+```js
+const OVERPASS_URLS = [
+  'https://overpass.kumi.systems/api/interpreter', // 已驗證 GAS 連得上，排第一個
+  'https://overpass-api.de/api/interpreter',        // 官方主站，當備援
+  'https://overpass.openstreetmap.ru/api/interpreter', // 第三順位備援
+];
+```
+
+依序打清單裡的每一個，連線失敗、回應不是 200、JSON 壞掉、或缺 `elements`
+陣列，都算這個鏡像失敗，自動換下一個試；成功／失敗都會寫 `Logger.log`，
+可以到 Apps Script 編輯器左側「執行項目 (Executions)」查是哪個鏡像回應的。
+全部鏡像都失敗，前端只會看到一句籠統的「所有地圖資料來源都連線失敗，請稍後再試」，
+不會列出每個鏡像個別的失敗原因（訊息太長沒意義）。
+
+如果哪天這幾個鏡像全部都不能用了，去
+[OSM Wiki 的 Overpass API 頁面](https://wiki.openstreetmap.org/wiki/Overpass_API#Public_Overpass_API_instances)
+找目前還在維運的公開鏡像站，加進 `OVERPASS_URLS` 陣列即可，不用動
+`fetchOverpassData_` 的重試邏輯。這次先做到「清單依序嘗試」，沒有做成
+可動態設定鏡像清單的進階功能。
+
 ## 9. 之後改 Code.gs 怎麼重新部署
 
 **Deploy → Manage deployments → 選現有的那個 → 鉛筆(編輯) → Version 選「New version」→ Deploy。**
@@ -211,7 +243,8 @@ Overpass 完全沒問題，這段邏輯之後可以考慮搬回前端**，把 GA
 | 辨識回「Gemini API 回應異常（已重試 2 次）（HTTP 503）」 | 免費層過載，連重試 3 次都沒排到；通常是短暫的，晚一點再上傳一次同一張截圖即可 |
 | 辨識一直回「辨識失敗，請手動填寫」 | 通常是 Gemini 沒回乾淨 JSON（已有防呆解析仍失敗），或圖片內容真的看不出地點；手動填寫即可，不影響儲存 |
 | 改了 `Code.gs` 但辨識行為沒變 | 忘記重新部署，見第 9 節「Manage deployments → New version」 |
-| 「依偏好推薦」一直顯示「推薦地點查詢失敗」 | 檢查 Overpass 服務本身有沒有問題（`overpass-api.de` 官方有時會過載）；也可能是還沒重新部署新版 `Code.gs`（舊版不認得 `recommendPlaces` 這個 action） |
+| 「依偏好推薦」一直顯示「推薦地點查詢失敗」（所有地圖資料來源都連線失敗） | `OVERPASS_URLS` 清單裡的鏡像全部連不上；去 Executions 頁面看 log 是哪個鏡像、什麼原因失敗，或去 OSM Wiki 找新的鏡像站替換（見第 8 節「多鏡像容錯」） |
+| 「依偏好推薦」查詢失敗，但看起來像沒重新部署 | 也可能是還沒重新部署新版 `Code.gs`（舊版不認得 `recommendPlaces` 這個 action，會走到新增地點的驗證邏輯，回「缺少必要欄位」） |
 | 「依偏好推薦」一直顯示「附近暫時沒有符合偏好的推薦地點」 | 正常情況：附近真的沒有符合類別的 OSM 資料，或半徑（`OVERPASS_RADIUS_M`）太小；郊區 / 資料稀疏地區比較容易發生 |
 | 存的地點 `coordSource` 一直是 `estimated` 或空字串，沒有 `geocoded` | 正常情況：Nominatim 查無結果就會這樣。可以查 Executions 的 log 看是「查無結果」還是「查詢失敗」；店名 + 地區文字太模糊、或地點根本沒被 OSM 收錄都會查不到 |
 | 存新地點變得比較慢 | 預期中的，因為多打一次 Nominatim；GAS 沒有逾時控制，查詢失敗一樣會 fallback，不會卡死，只是這次請求會多等一下 |
