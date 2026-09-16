@@ -10,6 +10,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // 關掉自動注入的註冊 script，改在 src/main.tsx 自己呼叫 registerSW()，
+      // 才能加「定期檢查更新」的邏輯（見 main.tsx 的說明）。
+      injectRegister: null,
       includeAssets: ['apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png'],
       manifest: {
         name: 'yoxi・AI 出行夥伴',
