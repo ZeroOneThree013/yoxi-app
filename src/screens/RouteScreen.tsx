@@ -53,13 +53,20 @@ export default function RouteScreen() {
       <TopBar title="AI 規劃路線" back="/plan" />
       <ScreenScroll>
         <div className="wide:grid wide:grid-cols-[minmax(0,1fr)_420px] wide:items-start wide:gap-10">
-          <div className="wide:order-1">
-            <RouteMap
-              stops={stops}
-              userLocation={route.origin}
-              className="wide:hidden"
-            />
+          {/*
+            只渲染一份地圖：手機版在內容最上面，寬螢幕用 grid 定位移到右欄並 sticky。
+            不可以改成「渲染兩份、各自用 CSS 藏一份」——display:none 不會阻止 React 掛載，
+            那樣會同時跑兩個 Leaflet 實例，OSRM 路徑請求直接翻倍（demo server 有 rate
+            limit，很容易被擋），而且被藏起來那份的容器尺寸是 0，fitBounds 會算出爆掉的
+            zoom 去抓一堆無用的圖磚。
+          */}
+          <RouteMap
+            stops={stops}
+            userLocation={route.origin}
+            className="wide:col-start-2 wide:row-start-1 wide:sticky wide:top-28 wide:mb-0 wide:h-[520px]"
+          />
 
+          <div className="wide:col-start-1 wide:row-start-1">
             <div className="mb-4 flex gap-2.5">
               {[
                 [totalDist.toFixed(1), '總公里'],
@@ -109,13 +116,6 @@ export default function RouteScreen() {
               </p>
             </div>
           </div>
-
-          {/* 寬螢幕：大地圖固定在右側，善用桌機的橫向空間 */}
-          <RouteMap
-            stops={stops}
-            userLocation={route.origin}
-            className="hidden wide:order-2 wide:sticky wide:top-28 wide:block wide:h-[520px]"
-          />
         </div>
       </ScreenScroll>
       <BottomBar>

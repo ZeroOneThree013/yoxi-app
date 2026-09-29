@@ -1,6 +1,6 @@
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   MapContainer,
   Marker,
@@ -90,10 +90,18 @@ export default function RouteMap({
   className?: string;
 }) {
   const user: [number, number] = [userLocation.lat, userLocation.lng];
-  const stopPts = stops
-    .filter((s) => !Number.isNaN(s.lat) && !Number.isNaN(s.lng))
-    .map((s) => [s.lat, s.lng] as [number, number]);
-  const points = [user, ...stopPts];
+
+  // 一定要 useMemo：RoadPaths / FitBounds 的 useEffect 依賴 points，
+  // 每次 render 重建陣列會讓它們每次 render 都重跑一次 —— 等於重打一輪 OSRM 請求。
+  const points = useMemo(
+    () => [
+      [userLocation.lat, userLocation.lng] as [number, number],
+      ...stops
+        .filter((s) => !Number.isNaN(s.lat) && !Number.isNaN(s.lng))
+        .map((s) => [s.lat, s.lng] as [number, number]),
+    ],
+    [userLocation.lat, userLocation.lng, stops],
+  );
 
   return (
     <div
