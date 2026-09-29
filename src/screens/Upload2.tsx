@@ -93,23 +93,28 @@ export default function Upload2() {
       <TopBar title="辨識截圖內容" back="/places/upload" wide="split" />
       <ScreenScroll wide="split">
         <div className="wide:grid wide:grid-cols-2 wide:items-start wide:gap-10">
-          <div
-            className="relative mb-4 flex h-[200px] items-center justify-center overflow-hidden rounded-2xl bg-paper-deep bg-contain bg-center bg-no-repeat font-mono text-[12px] text-[#8C6410] wide:mb-0 wide:aspect-[9/18] wide:h-auto wide:rounded-[28px]"
-            style={{
-              backgroundImage: state.imageDataUrl
-                ? `url(${state.imageDataUrl})`
-                : undefined,
-            }}
-          >
+          {/* 用真正的 <img> 讓框跟著截圖本身的長寬比走，手機直式截圖／桌機寬版截圖都不會被裁切或跑出奇怪的留白 */}
+          <div className="relative mb-4 overflow-hidden rounded-2xl bg-paper-deep font-mono text-[12px] text-[#8C6410] wide:mb-0 wide:rounded-[28px]">
+            {state.imageDataUrl && (
+              <img
+                src={state.imageDataUrl}
+                alt=""
+                className="block max-h-[240px] w-full object-contain wide:max-h-[70vh]"
+              />
+            )}
             {phase === 'processing' && (
-              <div className="flex flex-col items-center gap-2 rounded-xl bg-black/55 px-4 py-3 text-white">
-                <div className="spinner" />
-                AI 辨識截圖中…
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="flex flex-col items-center gap-2 rounded-xl bg-black/55 px-4 py-3 text-white">
+                  <div className="spinner" />
+                  AI 辨識截圖中…
+                </div>
               </div>
             )}
             {phase === 'done' && (
-              <div className="rounded-xl bg-black/55 px-4 py-3 text-white">
-                {recognizeError ? '辨識未完成，可手動填寫' : '截圖已辨識 ✓'}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="rounded-xl bg-black/55 px-4 py-3 text-white">
+                  {recognizeError ? '辨識未完成，可手動填寫' : '截圖已辨識 ✓'}
+                </div>
               </div>
             )}
           </div>
