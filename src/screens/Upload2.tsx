@@ -94,7 +94,7 @@ export default function Upload2() {
       <ScreenScroll wide="split">
         <div className="wide:grid wide:grid-cols-2 wide:items-start wide:gap-10">
           <div
-            className="relative mb-4 flex h-[200px] items-center justify-center overflow-hidden rounded-2xl bg-cover bg-center font-mono text-[12px] text-[#8C6410] wide:mb-0 wide:h-[420px] wide:rounded-[28px]"
+            className="relative mb-4 flex h-[200px] items-center justify-center overflow-hidden rounded-2xl bg-paper-deep bg-contain bg-center bg-no-repeat font-mono text-[12px] text-[#8C6410] wide:mb-0 wide:h-[420px] wide:rounded-[28px]"
             style={{
               backgroundImage: state.imageDataUrl
                 ? `url(${state.imageDataUrl})`
