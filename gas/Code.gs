@@ -122,10 +122,17 @@ const NOMINATIM_USER_AGENT =
 // 找目前還在維運的鏡像站，加進這個陣列即可，不用動下面的重試邏輯。
 // 依序嘗試的鏡像。注意：這些都是社群維運的免費服務，可用性會隨時間變動，
 // **清單順序需要定期用 testOverpassMirrors() 重新驗證**（見下方那個函式）。
+// 2026-09-29 用 testOverpassMirrors() 從 GAS 端實測的結果（清單順序就是依這個排的）：
+//   kumi.systems      HTTP 200、查到資料，但要 76.8 秒 ← 目前唯一可用的
+//   overpass-api.de   連線失敗，0.3 秒   ← 失敗得快，留著當備援沒有成本
+//   osm.jp            SSL Error，0.7 秒  ← 同上
+// 只留「可用」跟「失敗得很快」的。失敗要花 50 秒以上的鏡像（openstreetmap.ru、
+// private.coffee）已經移到 OVERPASS_CANDIDATE_URLS，不要放回這個清單——
+// 它們光是失敗就會吃掉整個時間預算，讓真正可用的鏡像根本輪不到。
 const OVERPASS_URLS = [
-  'https://overpass-api.de/api/interpreter', // 官方主站，資料最完整，但也最常壅塞
-  'https://overpass.kumi.systems/api/interpreter', // 社群大站，容量大
-  'https://overpass.osm.jp/api/interpreter', // 日本，地理上離台灣近
+  'https://overpass.kumi.systems/api/interpreter', // 實測唯一可用（但慢，76.8 秒）
+  'https://overpass-api.de/api/interpreter', // 官方主站；實測連線失敗但只花 0.3 秒
+  'https://overpass.osm.jp/api/interpreter', // 實測 SSL Error 但只花 0.7 秒
 ];
 
 // testOverpassMirrors() 會「額外」一起測的候選鏡像。
@@ -146,15 +153,28 @@ const OVERPASS_URLS = [
 //      擋（overpass-api.de 對某些出口 IP 一律回 406）。這兩種失敗看起來都像「掛了」，
 //      但 GAS 的出口 IP 不一定被擋。**只有 testOverpassMirrors() 的結果算數。**
 const OVERPASS_CANDIDATE_URLS = [
-  'https://overpass.openstreetmap.ru/api/interpreter',
-  'https://overpass.osm.be/api/interpreter',
-  'https://overpass.private.coffee/api/interpreter', // 註：與 kumi.systems 同一台機器
+  'https://overpass.openstreetmap.ru/api/interpreter', // 實測：連線失敗要花 50 秒，太慢
+  'https://overpass.private.coffee/api/interpreter', // 實測：HTTP 504 要花 106 秒；且與 kumi.systems 同一台機器
+  'https://overpass.osm.be/api/interpreter', // 實測：DNS error（2.2 秒）
 ];
 
 // 查詢總時間預算（毫秒）。GAS 的 UrlFetchApp 沒有逾時參數，沒辦法叫單一鏡像
 // 「幾秒內一定要回」；能做的是跑完一個鏡像後檢查已用時間，超過就不再試下一個。
-// 實測過三個鏡像全掛時串聯要 137 秒，遠超過前端逾時，使用者只是白等。
-const OVERPASS_TIME_BUDGET_MS = 40000;
+//
+// 為什麼是 100 秒這麼寬鬆：實測目前唯一可用的鏡像（kumi.systems）本身就要 76.8 秒，
+// 預算設太小會把「唯一會成功的那個」直接砍掉。OVERPASS_URLS 裡其餘鏡像都是
+// 1 秒內就失敗的，所以最壞情況約 78 秒，這個預算只是防止未來有人把慢鏡像
+// 加回清單。真正讓使用者不用每次等 77 秒的是下面的快取，不是這個預算。
+const OVERPASS_TIME_BUDGET_MS = 100000;
+
+// 查詢結果快取時間（秒）。Overpass 公共服務現在很慢（唯一可用的鏡像要 76.8 秒），
+// 每次都重查體驗太差；同一區域、同一類別的結果在這段時間內直接重用。
+// 附近有哪些店不會幾小時內就變，快取久一點沒有壞處。
+// CacheService 的上限就是 6 小時（21600 秒）。
+const OVERPASS_CACHE_TTL_SEC = 21600;
+// 快取的位置精度：座標取到小數點後 2 位（約 1.1 公里）當 key。
+// 搜尋半徑是 4 公里，使用者在 1 公里內移動時重用同一份結果是合理的。
+const OVERPASS_CACHE_COORD_DECIMALS = 2;
 const OVERPASS_RADIUS_M = 4000; // 3-5 公里，取中間值
 const OVERPASS_USER_AGENT =
   'yoxi-app/1.0 (hackathon demo; https://github.com/ZeroOneThree013/yoxi-app)';
@@ -964,6 +984,48 @@ function testOverpassMirrors() {
   );
 }
 
+/**
+ * 快取 key：類別 tag + 座標取到小數點後 OVERPASS_CACHE_COORD_DECIMALS 位。
+ * 取整是為了讓「附近」的查詢共用同一份結果——使用者走個幾百公尺不該重查一次
+ * 七十幾秒的 Overpass。
+ */
+function overpassCacheKey_(tag, lat, lng) {
+  const d = OVERPASS_CACHE_COORD_DECIMALS;
+  return (
+    'ov_' + tag.key + '_' + (tag.value || 'any') + '_' +
+    lat.toFixed(d) + '_' + lng.toFixed(d)
+  );
+}
+
+/** 讀快取；沒有、壞掉或格式不對都回 null（當作沒快取，重查一次就好） */
+function readOverpassCache_(key) {
+  try {
+    const raw = CacheService.getScriptCache().get(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length ? parsed : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * 寫快取。CacheService 單一值上限 100KB，超過會丟例外——
+ * 快取失敗不該影響這次查詢的結果，所以整段包在 try 裡，失敗就只記 log。
+ */
+function writeOverpassCache_(key, pois) {
+  try {
+    CacheService.getScriptCache().put(
+      key,
+      JSON.stringify(pois),
+      OVERPASS_CACHE_TTL_SEC,
+    );
+  } catch (err) {
+    Logger.log('寫入推薦地點快取失敗（不影響本次結果）：' +
+      (err && err.message ? err.message : err));
+  }
+}
+
 function handleRecommendPlaces_(body) {
   try {
     const lat = Number(body.lat);
@@ -974,6 +1036,16 @@ function handleRecommendPlaces_(body) {
     }
 
     const tag = categoryToOsmTag_(category);
+
+    // 先看快取：Overpass 公共服務現在很慢（唯一可用的鏡像實測要 76.8 秒），
+    // 同一區域重複查就直接重用結果，不要每次都讓使用者等一分多鐘。
+    const cacheKey = overpassCacheKey_(tag, lat, lng);
+    const cached = readOverpassCache_(cacheKey);
+    if (cached) {
+      Logger.log('推薦地點走快取：' + cacheKey + '（' + cached.length + ' 筆）');
+      return jsonOk_(cached);
+    }
+
     const query = buildOverpassQuery_(tag, lat, lng);
 
     const result = fetchOverpassData_(query);
@@ -1014,6 +1086,10 @@ function handleRecommendPlaces_(body) {
         address: addressParts.join(''),
       });
     }
+
+    // 只快取「真的有查到東西」的結果：查到 0 筆有可能是查詢當下的異常，
+    // 把空結果快取 6 小時會讓使用者在這段期間一直看到空清單。
+    if (pois.length) writeOverpassCache_(cacheKey, pois);
 
     return jsonOk_(pois);
   } catch (err) {

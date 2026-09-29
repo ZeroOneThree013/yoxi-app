@@ -176,6 +176,12 @@ export default function TaskSelect() {
 
             {seg === 'rec' && recStatus === 'loading' && (
               <div className="mb-4 space-y-2 rounded-2xl border border-line bg-card p-3">
+                {/* 免費的 Overpass 公共服務目前很慢（實測要一分多鐘），
+                    沒有提示的話使用者會以為當掉了 */}
+                <p className="px-1 pb-1 text-[11.5px] leading-relaxed text-muted">
+                  正在查附近的真實地點…第一次查詢可能要等一分鐘左右，
+                  之後同一區域會直接沿用結果。
+                </p>
                 {[0, 1, 2].map((i) => (
                   <div
                     key={i}
