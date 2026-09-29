@@ -3,6 +3,11 @@ export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
+      // 桌機／寬螢幕斷點：≥900px 時從「手機外框置中」切換成真正撐滿寬度的網頁版面
+      // （參考 lost-capybara 專案的 @media (min-width:900px) 作法）
+      screens: {
+        wide: '900px',
+      },
       colors: {
         // 仿舊車票紙質感（spec §5）
         ink: '#211C16',

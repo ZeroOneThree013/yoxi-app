@@ -119,107 +119,129 @@ export default function TaskSelect() {
     <>
       <TopBar title="選擇任務地點" back="/home" />
       <ScreenScroll>
-        <LocationStrip label="目前位置" />
-
-        <div className="mb-4 flex rounded-[14px] bg-paper-deep p-1">
-          {(
-            [
-              ['saved', '已存未去'],
-              ['rec', '依偏好推薦'],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setSeg(key)}
-              className={`flex-1 rounded-[11px] py-2.5 text-[12.5px] font-bold ${
-                seg === key ? 'bg-card text-ink shadow-card' : 'text-muted'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <p className="mb-2.5 text-[11.5px] text-muted">
-          可複選多個地點，AI 會依目前位置規劃最佳順序
-        </p>
-
-        {seg === 'rec' && recNote && (
-          <p className="mb-2.5 text-[11px] text-muted">{recNote}</p>
-        )}
-
-        {seg === 'rec' && recStatus === 'loading' && (
-          <div className="mb-4 space-y-2 rounded-2xl border border-line bg-card p-3">
-            {[0, 1, 2].map((i) => (
-              <div
-                key={i}
-                className="h-[52px] animate-pulse rounded-xl bg-paper-deep/60"
-              />
-            ))}
-          </div>
-        )}
-
-        {seg === 'rec' && recStatus === 'error' && (
-          <div className="mb-4 rounded-2xl border border-line bg-[#F9DED5] p-4 text-[12.5px] text-red-deep">
-            <p className="mb-3 leading-relaxed">
-              推薦地點查詢失敗，請稍後再試。
+        <div className="wide:grid wide:grid-cols-[280px_minmax(0,1fr)] wide:items-start wide:gap-10">
+          <aside className="hidden wide:sticky wide:top-28 wide:flex wide:flex-col wide:gap-4 wide:rounded-[28px] wide:border wide:border-line wide:bg-card wide:p-7">
+            <LocationStrip label="目前位置" />
+            <p className="text-[12px] leading-relaxed text-muted">
+              可複選多個地點，AI 會依目前位置規劃最佳順序
             </p>
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setRecStatus('idle');
-              }}
-            >
-              重新查詢
-            </Button>
-          </div>
-        )}
+            <div className="flex items-center justify-between rounded-[14px] bg-ink px-4 py-3 text-[12.5px] font-bold text-white">
+              <span>
+                已選{' '}
+                <span className="font-mono text-mustard">
+                  {selectedPlaceIds.length}
+                </span>{' '}
+                個地點
+              </span>
+            </div>
+          </aside>
 
-        {seg === 'rec' && recStatus === 'ready' && recommendations.length === 0 && (
-          <div className="mb-4 rounded-2xl border border-line bg-card p-4 text-center text-[12.5px] leading-relaxed text-muted">
-            附近暫時沒有符合偏好的推薦地點
-          </div>
-        )}
+          <div className="wide:min-w-0">
+            <div className="wide:hidden">
+              <LocationStrip label="目前位置" />
+            </div>
 
-        {(seg === 'saved' || (seg === 'rec' && recommendations.length > 0)) && (
-          <div className="mb-4 rounded-2xl border border-line bg-card px-3">
-            {seg === 'saved'
-              ? saved.map((p) => (
-                  <TaskRow
-                    key={p.id}
-                    place={p}
-                    sub={`${p.category} · ${p.region}`}
-                    origin={origin}
-                    selected={selectedPlaceIds.includes(p.id)}
-                    onToggle={() => dispatch({ type: 'toggleSelected', id: p.id })}
-                  />
-                ))
-              : recommendations.map((p) => (
-                  <TaskRow
-                    key={p.id}
-                    place={p}
-                    sub={
-                      p.region
-                        ? `推薦・${p.reason} · ${p.region}`
-                        : `推薦・${p.reason}`
-                    }
-                    origin={origin}
-                    selected={selectedPlaceIds.includes(p.id)}
-                    onToggle={() => dispatch({ type: 'toggleSelected', id: p.id })}
+            <div className="mb-4 flex rounded-[14px] bg-paper-deep p-1">
+              {(
+                [
+                  ['saved', '已存未去'],
+                  ['rec', '依偏好推薦'],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setSeg(key)}
+                  className={`flex-1 rounded-[11px] py-2.5 text-[12.5px] font-bold ${
+                    seg === key ? 'bg-card text-ink shadow-card' : 'text-muted'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <p className="mb-2.5 text-[11.5px] text-muted wide:hidden">
+              可複選多個地點，AI 會依目前位置規劃最佳順序
+            </p>
+
+            {seg === 'rec' && recNote && (
+              <p className="mb-2.5 text-[11px] text-muted">{recNote}</p>
+            )}
+
+            {seg === 'rec' && recStatus === 'loading' && (
+              <div className="mb-4 space-y-2 rounded-2xl border border-line bg-card p-3">
+                {[0, 1, 2].map((i) => (
+                  <div
+                    key={i}
+                    className="h-[52px] animate-pulse rounded-xl bg-paper-deep/60"
                   />
                 ))}
-          </div>
-        )}
+              </div>
+            )}
 
-        <div className="flex items-center justify-between rounded-[14px] bg-ink px-4 py-3 text-[12.5px] font-bold text-white">
-          <span>
-            已選{' '}
-            <span className="font-mono text-mustard">
-              {selectedPlaceIds.length}
-            </span>{' '}
-            個地點，將依此規劃順序
-          </span>
+            {seg === 'rec' && recStatus === 'error' && (
+              <div className="mb-4 rounded-2xl border border-line bg-[#F9DED5] p-4 text-[12.5px] text-red-deep">
+                <p className="mb-3 leading-relaxed">
+                  推薦地點查詢失敗，請稍後再試。
+                </p>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setRecStatus('idle');
+                  }}
+                >
+                  重新查詢
+                </Button>
+              </div>
+            )}
+
+            {seg === 'rec' && recStatus === 'ready' && recommendations.length === 0 && (
+              <div className="mb-4 rounded-2xl border border-line bg-card p-4 text-center text-[12.5px] leading-relaxed text-muted">
+                附近暫時沒有符合偏好的推薦地點
+              </div>
+            )}
+
+            {(seg === 'saved' || (seg === 'rec' && recommendations.length > 0)) && (
+              <div className="mb-4 rounded-2xl border border-line bg-card px-3">
+                {seg === 'saved'
+                  ? saved.map((p) => (
+                      <TaskRow
+                        key={p.id}
+                        place={p}
+                        sub={`${p.category} · ${p.region}`}
+                        origin={origin}
+                        selected={selectedPlaceIds.includes(p.id)}
+                        onToggle={() => dispatch({ type: 'toggleSelected', id: p.id })}
+                      />
+                    ))
+                  : recommendations.map((p) => (
+                      <TaskRow
+                        key={p.id}
+                        place={p}
+                        sub={
+                          p.region
+                            ? `推薦・${p.reason} · ${p.region}`
+                            : `推薦・${p.reason}`
+                        }
+                        origin={origin}
+                        selected={selectedPlaceIds.includes(p.id)}
+                        onToggle={() => dispatch({ type: 'toggleSelected', id: p.id })}
+                      />
+                    ))}
+              </div>
+            )}
+
+            <div className="flex items-center justify-between rounded-[14px] bg-ink px-4 py-3 text-[12.5px] font-bold text-white wide:hidden">
+              <span>
+                已選{' '}
+                <span className="font-mono text-mustard">
+                  {selectedPlaceIds.length}
+                </span>{' '}
+                個地點，將依此規劃順序
+              </span>
+            </div>
+          </div>
         </div>
       </ScreenScroll>
       <BottomBar>

@@ -22,52 +22,94 @@ export default function Home() {
   return (
     <>
       <ScreenScroll>
-        <div className="mb-5 mt-3">
-          <div className="text-[13px] font-bold text-red-deep">
-            嗨，{profile.nickname || '旅人'}
-          </div>
-          <h2 className="mt-1 font-display text-[24px]">今天想去哪裡晃晃？</h2>
-        </div>
-
-        <HomeCard tag="每日互動" tagTone="mustard" title="今天，過得怎麼樣？" to="/quiz">
-          {quizSummary}
-        </HomeCard>
-
-        <HomeCard
-          tag="每日任務"
-          tagTone="mustard"
-          title="今天的推薦任務"
-          to="/tasks"
-          footer={
-            <>
-              <StatPill>
-                {dailyTask.status === 'done' ? '已完成 ✓' : '進行中'}
-              </StatPill>
+        <div className="wide:grid wide:grid-cols-[320px_minmax(0,1fr)] wide:items-start wide:gap-10">
+          {/* 寬螢幕側欄：把手機版頂端的問候語換成常駐的個人狀態卡（呼應原型側欄設計） */}
+          <aside className="hidden wide:sticky wide:top-28 wide:flex wide:flex-col wide:gap-4 wide:rounded-[28px] wide:border wide:border-line wide:bg-card wide:p-7">
+            <div className="text-[13px] font-bold text-red-deep">
+              嗨，{profile.nickname || '旅人'}
+            </div>
+            <h2 className="font-display text-[26px] leading-snug">
+              今天想去哪裡晃晃？
+            </h2>
+            <p className="text-[13px] leading-relaxed text-muted">
+              {quizSummary}
+            </p>
+            <div className="mt-1 flex flex-wrap gap-2">
+              <StatPill>收藏 {places.length} 個地點</StatPill>
               <StatPill tone="mustard">
                 已集 {unlockedBadges}/{MOCK_BADGES.length} 枚徽章
               </StatPill>
-            </>
-          }
-        >
-          不定時推送的小任務，完成可解鎖徽章、點亮地圖
-        </HomeCard>
+            </div>
+          </aside>
 
-        <HomeCard
-          tag="想去的地方"
-          title={`你收藏了 ${places.length} 個地點`}
-          to="/places"
-          footer={<StatPill>還有 {unvisited} 個尚未去過</StatPill>}
-        >
-          來自 IG、Facebook、Google Maps 截圖 · {tainan} 個在台南
-        </HomeCard>
+          <div>
+            <div className="mb-5 mt-3 wide:hidden">
+              <div className="text-[13px] font-bold text-red-deep">
+                嗨，{profile.nickname || '旅人'}
+              </div>
+              <h2 className="mt-1 font-display text-[24px]">
+                今天想去哪裡晃晃？
+              </h2>
+            </div>
 
-        <HomeCard tag="AI Agent" tagTone="red" title="幫我規劃今天的路線" to="/plan">
-          {agentHint}
-        </HomeCard>
+            <div className="wide:grid wide:grid-cols-2 wide:gap-5">
+              <HomeCard
+                tag="每日互動"
+                tagTone="mustard"
+                title="今天，過得怎麼樣？"
+                to="/quiz"
+              >
+                {quizSummary}
+              </HomeCard>
 
-        <HomeCard tag="單純叫車" title="只是想搭車？" to="/quick-ride">
-          不用規劃行程，直接輸入目的地叫 yoxi 就好
-        </HomeCard>
+              <HomeCard
+                tag="每日任務"
+                tagTone="mustard"
+                title="今天的推薦任務"
+                to="/tasks"
+                footer={
+                  <>
+                    <StatPill>
+                      {dailyTask.status === 'done' ? '已完成 ✓' : '進行中'}
+                    </StatPill>
+                    <StatPill tone="mustard">
+                      已集 {unlockedBadges}/{MOCK_BADGES.length} 枚徽章
+                    </StatPill>
+                  </>
+                }
+              >
+                不定時推送的小任務，完成可解鎖徽章、點亮地圖
+              </HomeCard>
+
+              <HomeCard
+                tag="想去的地方"
+                title={`你收藏了 ${places.length} 個地點`}
+                to="/places"
+                footer={<StatPill>還有 {unvisited} 個尚未去過</StatPill>}
+              >
+                來自 IG、Facebook、Google Maps 截圖 · {tainan} 個在台南
+              </HomeCard>
+
+              <HomeCard
+                tag="AI Agent"
+                tagTone="red"
+                title="幫我規劃今天的路線"
+                to="/plan"
+              >
+                {agentHint}
+              </HomeCard>
+
+              <HomeCard
+                tag="單純叫車"
+                title="只是想搭車？"
+                to="/quick-ride"
+                className="wide:col-span-2"
+              >
+                不用規劃行程，直接輸入目的地叫 yoxi 就好
+              </HomeCard>
+            </div>
+          </div>
+        </div>
       </ScreenScroll>
       <BottomNav />
     </>

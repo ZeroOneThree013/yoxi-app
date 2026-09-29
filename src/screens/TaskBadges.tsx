@@ -14,12 +14,12 @@ export default function TaskBadges() {
           徽章收集牆（已解鎖 {unlocked} / {MOCK_BADGES.length}）
         </p>
 
-        <div className="mb-4 grid grid-cols-6 gap-2">
+        <div className="mb-4 grid grid-cols-6 gap-2 wide:grid-cols-12 wide:gap-3">
           {MOCK_BADGES.map((b) => (
             <div
               key={b.name}
               title={b.name}
-              className={`flex aspect-square flex-col items-center justify-center rounded-xl text-[18px] ${
+              className={`flex aspect-square flex-col items-center justify-center rounded-xl text-[18px] wide:rounded-2xl wide:text-[22px] ${
                 b.unlocked
                   ? 'border border-mustard bg-mustard text-white'
                   : 'border-[1.5px] border-dashed border-line bg-card opacity-60'
@@ -30,13 +30,15 @@ export default function TaskBadges() {
           ))}
         </div>
 
-        <RuleCard title="規則說明">
-          收藏的地點若符合節氣或季節限定條件（例如夏至剉冰店、冬至湯圓店），實際造訪後即可解鎖對應的專屬徽章，收集在個人徽章牆上。
-        </RuleCard>
+        <div className="wide:grid wide:grid-cols-2 wide:gap-5">
+          <RuleCard title="規則說明">
+            收藏的地點若符合節氣或季節限定條件（例如夏至剉冰店、冬至湯圓店），實際造訪後即可解鎖對應的專屬徽章，收集在個人徽章牆上。
+          </RuleCard>
 
-        <RuleCard title="已解鎖">
-          🌸 春分・賞花地點｜🍧 夏至・剉冰限定，都已收藏並完成造訪。
-        </RuleCard>
+          <RuleCard title="已解鎖">
+            🌸 春分・賞花地點｜🍧 夏至・剉冰限定，都已收藏並完成造訪。
+          </RuleCard>
+        </div>
 
         <div className="mt-3.5 flex items-start gap-2 rounded-xl bg-teal-soft px-3 py-2.5 text-[11.5px] leading-relaxed text-teal">
           <span>💡</span>

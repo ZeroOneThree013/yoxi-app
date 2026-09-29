@@ -90,84 +90,96 @@ export default function Upload2() {
 
   return (
     <>
-      <TopBar title="辨識截圖內容" back="/places/upload" />
-      <ScreenScroll>
-        <div
-          className="relative mb-4 flex h-[200px] items-center justify-center overflow-hidden rounded-2xl bg-cover bg-center font-mono text-[12px] text-[#8C6410]"
-          style={{
-            backgroundImage: state.imageDataUrl
-              ? `url(${state.imageDataUrl})`
-              : undefined,
-          }}
-        >
-          {phase === 'processing' && (
-            <div className="flex flex-col items-center gap-2 rounded-xl bg-black/55 px-4 py-3 text-white">
-              <div className="spinner" />
-              AI 辨識截圖中…
-            </div>
-          )}
-          {phase === 'done' && (
-            <div className="rounded-xl bg-black/55 px-4 py-3 text-white">
-              {recognizeError ? '辨識未完成，可手動填寫' : '截圖已辨識 ✓'}
-            </div>
-          )}
-        </div>
-
-        {phase === 'done' && (
-          <>
-            {recognizeError && (
-              <p className="mb-2 rounded-lg bg-[#F9DED5] px-3 py-2 text-[11.5px] leading-relaxed text-red-deep">
-                {recognizeError}，請直接手動填寫下方欄位。
-              </p>
+      <TopBar title="辨識截圖內容" back="/places/upload" wide="split" />
+      <ScreenScroll wide="split">
+        <div className="wide:grid wide:grid-cols-2 wide:items-start wide:gap-10">
+          <div
+            className="relative mb-4 flex h-[200px] items-center justify-center overflow-hidden rounded-2xl bg-cover bg-center font-mono text-[12px] text-[#8C6410] wide:mb-0 wide:h-[420px] wide:rounded-[28px]"
+            style={{
+              backgroundImage: state.imageDataUrl
+                ? `url(${state.imageDataUrl})`
+                : undefined,
+            }}
+          >
+            {phase === 'processing' && (
+              <div className="flex flex-col items-center gap-2 rounded-xl bg-black/55 px-4 py-3 text-white">
+                <div className="spinner" />
+                AI 辨識截圖中…
+              </div>
             )}
-            <p className="mb-1.5 text-[12px] text-muted">
-              AI 擷取的關鍵字（可手動修改）
-            </p>
-            <div className="rounded-2xl border border-line bg-card px-3.5">
-              {FIELDS.map((f, i) => (
-                <div
-                  key={f.key}
-                  className={`flex items-center justify-between py-2.5 ${
-                    i < FIELDS.length - 1 ? 'border-b border-line' : ''
-                  }`}
-                >
-                  <span className="shrink-0 text-[12px] font-bold text-[#8A8175]">
-                    {f.label}
-                  </span>
-                  <input
-                    value={form[f.key]}
-                    placeholder={f.placeholder}
-                    onChange={(e) =>
-                      setForm({ ...form, [f.key]: e.target.value })
-                    }
-                    className="w-3/5 border-none bg-transparent py-0.5 text-right text-[13.5px] font-bold text-ink outline-none placeholder:font-normal placeholder:text-[#B3AB9E] focus:border-b-[1.5px] focus:border-red"
-                  />
+            {phase === 'done' && (
+              <div className="rounded-xl bg-black/55 px-4 py-3 text-white">
+                {recognizeError ? '辨識未完成，可手動填寫' : '截圖已辨識 ✓'}
+              </div>
+            )}
+          </div>
+
+          <div>
+            {phase === 'idle' && (
+              <div className="hidden rounded-2xl border-[1.5px] border-dashed border-line bg-card p-6 text-center text-[12.5px] leading-relaxed text-muted wide:block">
+                按下方「開始 AI 辨識」，AI 會讀取左側截圖並整理出可編輯的店名、地區與種類。
+              </div>
+            )}
+
+            {phase === 'done' && (
+              <>
+                {recognizeError && (
+                  <p className="mb-2 rounded-lg bg-[#F9DED5] px-3 py-2 text-[11.5px] leading-relaxed text-red-deep">
+                    {recognizeError}，請直接手動填寫下方欄位。
+                  </p>
+                )}
+                <p className="mb-1.5 text-[12px] text-muted">
+                  AI 擷取的關鍵字（可手動修改）
+                </p>
+                <div className="rounded-2xl border border-line bg-card px-3.5">
+                  {FIELDS.map((f, i) => (
+                    <div
+                      key={f.key}
+                      className={`flex items-center justify-between py-2.5 ${
+                        i < FIELDS.length - 1 ? 'border-b border-line' : ''
+                      }`}
+                    >
+                      <span className="shrink-0 text-[12px] font-bold text-[#8A8175]">
+                        {f.label}
+                      </span>
+                      <input
+                        value={form[f.key]}
+                        placeholder={f.placeholder}
+                        onChange={(e) =>
+                          setForm({ ...form, [f.key]: e.target.value })
+                        }
+                        className="w-3/5 border-none bg-transparent py-0.5 text-right text-[13.5px] font-bold text-ink outline-none placeholder:font-normal placeholder:text-[#B3AB9E] focus:border-b-[1.5px] focus:border-red"
+                      />
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <p className="mt-2.5 text-[11.5px] text-muted">
-              關鍵字將用於「地區」與「種類偏好」推薦引擎，儲存後會直接加入收藏清單。
-            </p>
-          </>
-        )}
+                <p className="mt-2.5 text-[11.5px] text-muted">
+                  關鍵字將用於「地區」與「種類偏好」推薦引擎，儲存後會直接加入收藏清單。
+                </p>
+              </>
+            )}
+          </div>
+        </div>
       </ScreenScroll>
-      <BottomBar>
+      <BottomBar wide="split">
         {saveError && (
           <p className="text-center text-[12px] text-red-deep">{saveError}</p>
         )}
-        {phase === 'done' ? (
-          <Button onClick={() => void save()} disabled={saving}>
-            {saving ? '儲存中…' : '儲存到「想去的地方」'}
-          </Button>
-        ) : (
-          <Button
-            variant="teal"
-            disabled={phase === 'processing'}
-            onClick={() => void runExtract()}
-          >
-            {phase === 'processing' ? '辨識中…' : '開始 AI 辨識'}
-          </Button>
-        )}
+        <div className="wide:mx-auto wide:max-w-[420px]">
+          {phase === 'done' ? (
+            <Button onClick={() => void save()} disabled={saving}>
+              {saving ? '儲存中…' : '儲存到「想去的地方」'}
+            </Button>
+          ) : (
+            <Button
+              variant="teal"
+              disabled={phase === 'processing'}
+              onClick={() => void runExtract()}
+            >
+              {phase === 'processing' ? '辨識中…' : '開始 AI 辨識'}
+            </Button>
+          )}
+        </div>
       </BottomBar>
     </>
   );

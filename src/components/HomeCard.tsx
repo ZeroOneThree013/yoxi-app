@@ -10,6 +10,7 @@ export default function HomeCard({
   to,
   onClick,
   footer,
+  className = '',
 }: {
   tag: string;
   tagTone?: 'teal' | 'red' | 'mustard';
@@ -18,13 +19,14 @@ export default function HomeCard({
   to?: string;
   onClick?: () => void;
   footer?: ReactNode;
+  className?: string;
 }) {
   const navigate = useNavigate();
   return (
     <button
       type="button"
       onClick={() => (onClick ? onClick() : to && navigate(to))}
-      className="mb-4 block w-full overflow-hidden rounded-[20px] border border-line bg-card p-[18px] text-left active:scale-[0.98]"
+      className={`mb-4 block w-full overflow-hidden rounded-[20px] border border-line bg-card p-[18px] text-left active:scale-[0.98] wide:mb-0 wide:h-full ${className}`}
     >
       <div className="mb-3 flex items-start justify-between">
         <div>

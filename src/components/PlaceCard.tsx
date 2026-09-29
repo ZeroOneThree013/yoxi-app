@@ -8,15 +8,17 @@ import { Tag } from './ui';
 export default function PlaceCard({
   place,
   onClick,
+  className = '',
 }: {
   place: Place;
   onClick?: () => void;
+  className?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="relative mb-3 flex w-full gap-4 rounded-l-[14px] rounded-r-[4px] border border-line bg-card py-3.5 pl-[18px] pr-3.5 text-left active:scale-[0.99]"
+      className={`relative mb-3 flex w-full gap-4 rounded-l-[14px] rounded-r-[4px] border border-line bg-card py-3.5 pl-[18px] pr-3.5 text-left active:scale-[0.99] wide:mb-0 ${className}`}
     >
       {/* 撕票線 */}
       <span className="pointer-events-none absolute bottom-2.5 top-2.5 border-l-[1.5px] border-dashed border-line" style={{ left: 86 }} />
@@ -38,8 +40,8 @@ export default function PlaceCard({
         )}
       </div>
 
-      <div className="pl-1.5">
-        <h4 className="mb-0.5 font-display text-[14.5px]">
+      <div className="min-w-0 flex-1 pl-1.5">
+        <h4 className="mb-0.5 break-words font-display text-[14.5px]">
           {place.region ? `${place.region}・` : ''}
           {place.name}
         </h4>

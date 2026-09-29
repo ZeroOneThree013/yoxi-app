@@ -8,7 +8,7 @@ const items = [
 
 export default function BottomNav() {
   return (
-    <nav className="relative z-30 flex h-16 shrink-0 items-center justify-around border-t border-line bg-card pb-[env(safe-area-inset-bottom)]">
+    <nav className="relative z-30 flex h-16 shrink-0 items-center justify-around border-t border-line bg-card pb-[env(safe-area-inset-bottom)] wide:hidden">
       {items.map((it) => (
         <NavLink
           key={it.to}

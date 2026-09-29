@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import WebNav from './WebNav';
 
 /** 把 Date 格式化成狀態列要的 24 小時制「HH:MM」，不含秒數 */
 function formatClock(d: Date): string {
@@ -44,24 +45,38 @@ function useClock(): string {
 }
 
 /**
- * 桌機時把 App 放進手機外框（對照原型的 .phone），
+ * 手機／平板寬度（<900px）：跟原本一樣，桌機時把 App 縮進手機外框（對照原型的 .phone），
  * 手機時直接鋪滿整個視窗（PWA 加到主畫面後的樣子）。
+ *
+ * 寬螢幕（≥900px，`wide:`）：不再縮成一支手機置中在畫面中間，改成撐滿寬度的真正網頁版面
+ * （頂部換成 WebNav 導覽列，畫面本身也改用一般文件捲動），避免桌機瀏覽器開起來大片空白
+ * （參考 lost-capybara 專案 index.html 的 @media (min-width:900px) 作法）。
  */
-export default function PhoneFrame({ children }: { children: ReactNode }) {
+export default function PhoneFrame({
+  children,
+  showNav = true,
+}: {
+  children: ReactNode;
+  showNav?: boolean;
+}) {
   const time = useClock();
 
   return (
-    <div className="flex min-h-full w-full justify-center bg-[#e7ddc4] sm:items-center sm:py-10">
+    <div className="flex min-h-full w-full justify-center bg-[#e7ddc4] sm:items-center sm:py-10 wide:block wide:bg-paper wide:py-0">
       <div
         className="relative flex h-[100dvh] w-full max-w-[430px] flex-col overflow-hidden bg-paper shadow-frame
-                   sm:h-[min(812px,calc(100dvh-80px))] sm:w-[390px] sm:rounded-[44px] sm:border-[10px] sm:border-[#0f0d0b]"
+                   sm:h-[min(812px,calc(100dvh-80px))] sm:w-[390px] sm:rounded-[44px] sm:border-[10px] sm:border-[#0f0d0b]
+                   wide:h-auto wide:min-h-dvh wide:w-full wide:max-w-none wide:overflow-visible wide:rounded-none wide:border-0 wide:shadow-none"
       >
-        {/* 狀態列（對照原型 .statusbar；時間是真的，電量／訊號是裝飾） */}
-        <div className="flex shrink-0 items-center justify-between px-6 pt-[env(safe-area-inset-top)] font-mono text-[12px] text-ink/80">
+        {/* 狀態列（對照原型 .statusbar；時間是真的，電量／訊號是裝飾）。寬螢幕改用 WebNav，不顯示這條 */}
+        <div className="flex shrink-0 items-center justify-between px-6 pt-[env(safe-area-inset-top)] font-mono text-[12px] text-ink/80 wide:hidden">
           <span className="py-2">{time}</span>
           <span className="py-2">● ● ● 100%</span>
         </div>
-        <div className="relative flex min-h-0 flex-1 flex-col">{children}</div>
+        {showNav && <WebNav />}
+        <div className="relative flex min-h-0 flex-1 flex-col wide:min-h-dvh">
+          {children}
+        </div>
       </div>
     </div>
   );

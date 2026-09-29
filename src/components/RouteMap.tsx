@@ -82,10 +82,12 @@ function FitBounds({ points }: { points: [number, number][] }) {
 export default function RouteMap({
   stops,
   userLocation,
+  className = '',
 }: {
   stops: PlannedStop[];
   /** 規劃當下的出發點（route.origin）：真實 GPS 或 fallback */
   userLocation: Coord;
+  className?: string;
 }) {
   const user: [number, number] = [userLocation.lat, userLocation.lng];
   const stopPts = stops
@@ -94,7 +96,9 @@ export default function RouteMap({
   const points = [user, ...stopPts];
 
   return (
-    <div className="mb-4 h-[260px] overflow-hidden rounded-[18px] bg-paper-deep">
+    <div
+      className={`mb-4 h-[260px] overflow-hidden rounded-[18px] bg-paper-deep ${className}`}
+    >
       <MapContainer
         center={user}
         zoom={13}
