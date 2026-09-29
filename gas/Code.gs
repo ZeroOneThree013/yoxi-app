@@ -123,24 +123,32 @@ const NOMINATIM_USER_AGENT =
 // 依序嘗試的鏡像。注意：這些都是社群維運的免費服務，可用性會隨時間變動，
 // **清單順序需要定期用 testOverpassMirrors() 重新驗證**（見下方那個函式）。
 const OVERPASS_URLS = [
-  'https://overpass.nchc.org.tw/api/interpreter', // 台灣國網中心；地理位置最近，對台灣查詢最合適
-  'https://overpass.kumi.systems/api/interpreter', // 社群大站，容量大但也常被打爆
-  'https://overpass-api.de/api/interpreter', // 官方主站，最常壅塞，放最後當備援
+  'https://overpass-api.de/api/interpreter', // 官方主站，資料最完整，但也最常壅塞
+  'https://overpass.kumi.systems/api/interpreter', // 社群大站，容量大
+  'https://overpass.osm.jp/api/interpreter', // 日本，地理上離台灣近
 ];
 
 // testOverpassMirrors() 會「額外」一起測的候選鏡像。
 // 想換鏡像時，先跑 testOverpassMirrors() 看哪個在 GAS 端又快又有台灣資料，
 // 再把它移進上面的 OVERPASS_URLS。
 //
-// 選鏡像的兩個陷阱（實測踩過）：
-//   1. 有些是「單一國家」的區域性實例，例如 overpass.osm.ch 只收錄瑞士資料：
-//      查台北會回 HTTP 200 但 0 筆，看起來正常其實完全不能用。
-//   2. 從瀏覽器測會被 CORS 擋（看起來像掛了），但 GAS 沒有 CORS 限制可能完全正常，
-//      所以一定要用 testOverpassMirrors() 從 GAS 端測，不要只在瀏覽器試。
+// 選鏡像的四個陷阱（都是實測踩過的，不要再踩）：
+//   1. **區域性實例**：例如 overpass.osm.ch 只收錄瑞士資料，查台北會回 HTTP 200
+//      但 0 筆——看起來完全正常，其實永遠查不到東西。所以驗證一定要看「筆數」，
+//      不能只看 HTTP 200。
+//   2. **內網網域**：overpass.nchc.org.tw（台灣國網）DNS 解析到 10.235.38.16，
+//      是 RFC1918 私有位址，只有該單位內網連得到，從 GAS 一定是 DNS error。
+//      已經試過，不要再加回來。
+//   3. **同一台機器的不同網域**：overpass.private.coffee 與 overpass.kumi.systems
+//      都指向 flanders.servers.private.coffee（193.219.97.30），放兩個是假的備援，
+//      一個掛另一個一定也掛。
+//   4. **測試環境會騙人**：瀏覽器測會被 CORS 擋、一般機器測可能被鏡像的防濫用機制
+//      擋（overpass-api.de 對某些出口 IP 一律回 406）。這兩種失敗看起來都像「掛了」，
+//      但 GAS 的出口 IP 不一定被擋。**只有 testOverpassMirrors() 的結果算數。**
 const OVERPASS_CANDIDATE_URLS = [
-  'https://overpass.osm.jp/api/interpreter',
   'https://overpass.openstreetmap.ru/api/interpreter',
-  'https://overpass.private.coffee/api/interpreter',
+  'https://overpass.osm.be/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter', // 註：與 kumi.systems 同一台機器
 ];
 
 // 查詢總時間預算（毫秒）。GAS 的 UrlFetchApp 沒有逾時參數，沒辦法叫單一鏡像
@@ -878,9 +886,14 @@ function shortMirrorName_(url) {
  * 手動測試用：在 Apps Script 編輯器選這個函式按 Run，看 Executions 的 log，
  * 就能知道「從 GAS 出去」實際連得到哪些 Overpass 鏡像、各花多久。
  *
- * 為什麼需要這個：從瀏覽器測不準。部分鏡像（例如台灣國網 overpass.nchc.org.tw）
- * 會被瀏覽器的 CORS 擋掉而看起來「失敗」，但 GAS 沒有 CORS 限制，可能完全可用；
- * 反過來也有鏡像擋 GAS 的出口 IP。要換 OVERPASS_URLS 的順序前先跑這個。
+ * 為什麼需要這個：**在別的地方測都不準**，三種環境會得到三種結果：
+ *   - 瀏覽器：被 CORS 擋，失敗原因一律顯示成 TypeError: Failed to fetch，
+ *     分不出是 CORS、DNS 還是伺服器真的掛了。
+ *   - 一般機器 / 命令列：可能被鏡像的防濫用機制擋（overpass-api.de 對某些
+ *     出口 IP 一律回 406），看起來像服務掛了，其實只是那個 IP 被擋。
+ *   - GAS：出口 IP 不同，結果又不一樣。
+ * 線上真正在打 Overpass 的是 GAS，所以要換 OVERPASS_URLS 前，
+ * **一定要跑這個函式、以它的結果為準**，不要用其他環境的測試結果決定。
  */
 function testOverpassMirrors() {
   const candidates = OVERPASS_URLS.concat(OVERPASS_CANDIDATE_URLS);
@@ -895,12 +908,15 @@ function testOverpassMirrors() {
     muteHttpExceptions: true,
   };
 
+  const usable = [];
+
   for (let i = 0; i < candidates.length; i++) {
     const url = candidates[i];
     const t0 = Date.now();
     try {
       const res = UrlFetchApp.fetch(url, options);
       const ms = Date.now() - t0;
+      const code = res.getResponseCode();
       let count = -1;
       try {
         const parsed = JSON.parse(res.getContentText());
@@ -908,18 +924,43 @@ function testOverpassMirrors() {
       } catch (e) {
         // 不是 JSON，count 維持 -1
       }
+      // 「可用」的定義：HTTP 200 + 真的有查到台灣的資料。
+      // 只看 200 會被區域性實例騙（例如只有瑞士資料的鏡像，查台北回 200 但 0 筆）。
+      if (code === 200 && count > 0) usable.push({ url: url, ms: ms, count: count });
       Logger.log(
-        url + ' → HTTP ' + res.getResponseCode() + '，' + ms + 'ms，' +
+        (code === 200 && count > 0 ? '[可用] ' : '[不可用] ') +
+          url + ' → HTTP ' + code + '，' + ms + 'ms，' +
           (count >= 0 ? '台北 800m 內查到 ' + count + ' 筆' : '回應不是 JSON'),
       );
     } catch (err) {
-      Logger.log(url + ' → 連線失敗（' + (Date.now() - t0) + 'ms）：' +
+      Logger.log('[不可用] ' + url + ' → 連線失敗（' + (Date.now() - t0) + 'ms）：' +
         (err && err.message ? err.message : err));
     }
   }
+
+  Logger.log('──────── 結論 ────────');
+  if (!usable.length) {
+    Logger.log(
+      '這次測試沒有任何鏡像可用。可能是 Overpass 公共服務整體壅塞（過一陣子再測一次），' +
+        '或這些鏡像都擋了 GAS 的出口 IP。可到 ' +
+        'https://wiki.openstreetmap.org/wiki/Overpass_API#Public_Overpass_API_instances ' +
+        '找其他實例加進 OVERPASS_CANDIDATE_URLS 再測。',
+    );
+    return;
+  }
+
+  usable.sort(function (a, b) {
+    return a.ms - b.ms; // 快的排前面
+  });
+  Logger.log('把下面這段直接取代 Code.gs 的 OVERPASS_URLS（已依實測速度排序）：');
   Logger.log(
-    '提示：挑「HTTP 200 + 有查到筆數 + 秒數短」的鏡像放進 OVERPASS_URLS 最前面。' +
-      '查到 0 筆代表那個鏡像沒有台灣資料（例如只收錄單一國家的區域性實例），不能用。',
+    'const OVERPASS_URLS = [\n' +
+      usable
+        .map(function (u) {
+          return "  '" + u.url + "', // " + u.ms + 'ms，' + u.count + ' 筆';
+        })
+        .join('\n') +
+      '\n];',
   );
 }
 
