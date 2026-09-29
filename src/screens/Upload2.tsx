@@ -92,7 +92,13 @@ export default function Upload2() {
     <>
       <TopBar title="辨識截圖內容" back="/places/upload" wide="split" />
       <ScreenScroll wide="split">
-        <div className="wide:grid wide:grid-cols-2 wide:items-start wide:gap-10">
+        <div
+          className={
+            phase === 'done'
+              ? 'wide:grid wide:grid-cols-2 wide:items-start wide:gap-10'
+              : 'wide:mx-auto wide:max-w-[720px]'
+          }
+        >
           <div>
             {/* 用真正的 <img> 讓框跟著截圖本身的長寬比走，手機直式截圖／桌機寬版截圖都不會被裁切或跑出奇怪的留白 */}
             <div className="relative mb-4 overflow-hidden rounded-2xl bg-paper-deep font-mono text-[12px] text-[#8C6410] wide:rounded-[28px]">
@@ -100,7 +106,7 @@ export default function Upload2() {
                 <img
                   src={state.imageDataUrl}
                   alt=""
-                  className="block max-h-[420px] w-full object-contain wide:max-h-[80vh]"
+                  className="block max-h-[420px] w-full object-contain wide:max-h-[85vh]"
                 />
               )}
               {phase === 'processing' && (
@@ -127,45 +133,43 @@ export default function Upload2() {
             )}
           </div>
 
-          <div>
-            {phase === 'done' && (
-              <>
-                {recognizeError && (
-                  <p className="mb-2 rounded-lg bg-[#F9DED5] px-3 py-2 text-[11.5px] leading-relaxed text-red-deep">
-                    {recognizeError}，請直接手動填寫下方欄位。
-                  </p>
-                )}
-                <p className="mb-1.5 text-[12px] text-muted">
-                  AI 擷取的關鍵字（可手動修改）
+          {phase === 'done' && (
+            <div>
+              {recognizeError && (
+                <p className="mb-2 rounded-lg bg-[#F9DED5] px-3 py-2 text-[11.5px] leading-relaxed text-red-deep">
+                  {recognizeError}，請直接手動填寫下方欄位。
                 </p>
-                <div className="rounded-2xl border border-line bg-card px-3.5">
-                  {FIELDS.map((f, i) => (
-                    <div
-                      key={f.key}
-                      className={`flex items-center justify-between py-2.5 ${
-                        i < FIELDS.length - 1 ? 'border-b border-line' : ''
-                      }`}
-                    >
-                      <span className="shrink-0 text-[12px] font-bold text-[#8A8175]">
-                        {f.label}
-                      </span>
-                      <input
-                        value={form[f.key]}
-                        placeholder={f.placeholder}
-                        onChange={(e) =>
-                          setForm({ ...form, [f.key]: e.target.value })
-                        }
-                        className="w-3/5 border-none bg-transparent py-0.5 text-right text-[13.5px] font-bold text-ink outline-none placeholder:font-normal placeholder:text-[#B3AB9E] focus:border-b-[1.5px] focus:border-red"
-                      />
-                    </div>
-                  ))}
-                </div>
-                <p className="mt-2.5 text-[11.5px] text-muted">
-                  關鍵字將用於「地區」與「種類偏好」推薦引擎，儲存後會直接加入收藏清單。
-                </p>
-              </>
-            )}
-          </div>
+              )}
+              <p className="mb-1.5 text-[12px] text-muted">
+                AI 擷取的關鍵字（可手動修改）
+              </p>
+              <div className="rounded-2xl border border-line bg-card px-3.5">
+                {FIELDS.map((f, i) => (
+                  <div
+                    key={f.key}
+                    className={`flex items-center justify-between py-2.5 ${
+                      i < FIELDS.length - 1 ? 'border-b border-line' : ''
+                    }`}
+                  >
+                    <span className="shrink-0 text-[12px] font-bold text-[#8A8175]">
+                      {f.label}
+                    </span>
+                    <input
+                      value={form[f.key]}
+                      placeholder={f.placeholder}
+                      onChange={(e) =>
+                        setForm({ ...form, [f.key]: e.target.value })
+                      }
+                      className="w-3/5 border-none bg-transparent py-0.5 text-right text-[13.5px] font-bold text-ink outline-none placeholder:font-normal placeholder:text-[#B3AB9E] focus:border-b-[1.5px] focus:border-red"
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className="mt-2.5 text-[11.5px] text-muted">
+                關鍵字將用於「地區」與「種類偏好」推薦引擎，儲存後會直接加入收藏清單。
+              </p>
+            </div>
+          )}
         </div>
       </ScreenScroll>
       <BottomBar wide="split">
