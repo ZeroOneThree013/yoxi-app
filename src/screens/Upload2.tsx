@@ -176,11 +176,19 @@ export default function Upload2() {
         {saveError && (
           <p className="text-center text-[12px] text-red-deep">{saveError}</p>
         )}
-        <div className="wide:mx-auto wide:max-w-[420px]">
+        <div className="space-y-2.5 wide:mx-auto wide:max-w-[420px]">
           {phase === 'done' ? (
-            <Button onClick={() => void save()} disabled={saving}>
-              {saving ? '儲存中…' : '儲存到「想去的地方」'}
-            </Button>
+            <>
+              {/* 辨識失敗多半是 Gemini 暫時過載，讓使用者原地重試，不用退回上一頁重傳截圖 */}
+              {recognizeError && (
+                <Button variant="ghost" onClick={() => void runExtract()}>
+                  重新辨識
+                </Button>
+              )}
+              <Button onClick={() => void save()} disabled={saving}>
+                {saving ? '儲存中…' : '儲存到「想去的地方」'}
+              </Button>
+            </>
           ) : (
             <Button
               variant="teal"

@@ -36,8 +36,9 @@
  *     設定方式見 gas/README.md。
  *   - 用的是 Google AI Studio 申請的免費額度金鑰，有請求次數限制（RPM / RPD）。
  *     如果辨識常常回「Gemini API 額度已用完」，去 Google AI Studio 的用量頁面確認額度。
- *   - 免費層偶爾會回 503（暫時性過載）：遇到 503 或連線逾時會自動重試
- *     （見 RECOGNIZE_RETRY_DELAYS_MS、fetchGeminiWithRetry_），都失敗才回錯誤。
+ *   - 免費層常回 503「This model is currently experiencing high demand」：那是
+ *     **單一模型**的容量問題，重打同一個模型幾乎一定再撞一次，所以改成依序換模型
+ *     （見 GEMINI_MODELS、callGeminiWithFallback_），全部模型都失敗才回錯誤。
  */
 
 const SHEET_NAME = 'Places';
@@ -59,19 +60,32 @@ const HEADERS = [
 const IMAGE_MAX_LEN = 45000; // Google Sheets 單一儲存格上限約 50,000 字元
 
 // ── 截圖辨識（Gemini API）設定 ──────────────────────────────────────────
-// 如果這個 model 之後 deprecated，到 Google AI Studio 文件查目前可用的多模態
-// model 名稱，改這裡即可，不用動呼叫邏輯。
-const GEMINI_MODEL = 'gemini-3.6-flash';
-const GEMINI_API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/' +
-  GEMINI_MODEL +
-  ':generateContent';
+// 依序嘗試的模型清單：**第一個成功就用它**，失敗（過載 / 額度 / 連線錯誤）就換下一個。
+//
+// 為什麼是清單而不是單一模型：免費層最常見的失敗是 503「This model is currently
+// experiencing high demand」，那是「這個模型現在沒容量」，不是網路抖動——隔一兩秒
+// 重打同一個模型幾乎一定再撞一次。換一個模型才是真正有機會成功的做法。
+//
+// 清單順序 = 偏好順序（前面品質較好、後面較輕量但通常比較有容量）。
+// 模型若之後 deprecated，到 Google AI Studio 文件查目前可用的**多模態**模型名稱，
+// 改這個陣列即可，不用動呼叫邏輯；不支援圖片輸入的模型會回 400，
+// callGeminiWithFallback_ 會自動跳過換下一個，不會讓整個流程掛掉。
+const GEMINI_MODELS = [
+  'gemini-3.6-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+];
+const GEMINI_API_BASE =
+  'https://generativelanguage.googleapis.com/v1beta/models/';
 // base64 字串長度上限（約 6MB 原始檔案）：避免 GAS 執行時間 / Gemini 請求大小限制炸掉。
 // 前端上傳時已經先壓縮過，這裡是後端這邊的防呆，不是唯一防線。
 const RECOGNIZE_IMAGE_MAX_LEN = 8000000;
-// 免費層偶爾會 503（暫時性過載）或連線逾時，遇到就等一下重試，不用整個當掉。
-// 陣列長度 = 重試次數，值 = 該次重試前要等多久（毫秒）。
-const RECOGNIZE_RETRY_DELAYS_MS = [600, 1500];
+// 換下一個模型前要等多久（毫秒）。純粹避免連續打太快，不需要長退避——
+// 換模型本身就是在換一個不同的容量池，不是在等同一個模型變空。
+const RECOGNIZE_MODEL_SWITCH_DELAY_MS = 400;
+// 回應長度上限：辨識結果只有幾個短欄位，用不到太多 token。設上限可以避免
+// 新模型的 thinking 內容把回應撐爆、造成 finishReason=MAX_TOKENS 的截斷 JSON。
+const RECOGNIZE_MAX_OUTPUT_TOKENS = 2048;
 
 // ── 地理編碼（Nominatim / OpenStreetMap，免費）設定 ─────────────────────────
 // 使用規範重點：
@@ -436,32 +450,105 @@ function geocodePlace_(storeName, region) {
 /* ─────────────── 截圖辨識（Gemini API） ─────────────── */
 
 /**
- * 呼叫 Gemini，遇到 503（暫時性過載）或連線層級的錯誤（逾時等）就照
- * RECOGNIZE_RETRY_DELAYS_MS 等一下再試，同一個 model、同一份 payload。
- * 其他狀態碼（例如 200、429、400）第一次就直接回傳，不重試。
- * 回傳 { res } 表示有拿到 HTTP 回應（呼叫端自己判斷 status code）；
- * 回傳 { fetchError } 表示重試用盡、連線層級一直失敗。
+ * 依序拿 GEMINI_MODELS 裡的模型去打同一份 payload，第一個「真的拿到可用文字」
+ * 的模型就回傳結果；任何一種失敗都換下一個模型繼續試。
+ *
+ * 會換下一個模型的情況（全部都算「這個模型現在不能用」，不是致命錯誤）：
+ *   - HTTP 503：模型過載（免費層最常見，訊息是 high demand）
+ *   - HTTP 429：這個模型的額度 / 頻率上限（配額是分模型算的，換一個有機會成功）
+ *   - HTTP 400 等：例如這個模型不吃圖片輸入
+ *   - 連線層級例外、回傳不是 JSON、沒有 candidates
+ *   - finishReason 不是 STOP：回應被截斷（例如 MAX_TOKENS），JSON 會不完整
+ *
+ * 回傳 { text, model } 表示成功；回傳 { problems } 表示全部模型都失敗，
+ * problems 是每個模型各自的失敗原因（給錯誤訊息用，方便之後排查）。
  */
-function fetchGeminiWithRetry_(url, options) {
-  const maxAttempts = RECOGNIZE_RETRY_DELAYS_MS.length + 1;
-  let lastFetchError = null;
+function callGeminiWithFallback_(payload, apiKey) {
+  const problems = [];
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    if (attempt > 1) {
-      Utilities.sleep(RECOGNIZE_RETRY_DELAYS_MS[attempt - 2]);
-    }
+  for (let i = 0; i < GEMINI_MODELS.length; i++) {
+    const model = GEMINI_MODELS[i];
+    if (i > 0) Utilities.sleep(RECOGNIZE_MODEL_SWITCH_DELAY_MS);
+
+    let res;
     try {
-      const res = UrlFetchApp.fetch(url, options);
-      if (res.getResponseCode() === 503 && attempt < maxAttempts) {
-        continue; // 暫時性過載，再試一次
-      }
-      return { res: res };
+      res = UrlFetchApp.fetch(GEMINI_API_BASE + model + ':generateContent', {
+        method: 'post',
+        contentType: 'application/json',
+        // 金鑰放 header 不放 query string：避免 API key 被寫進執行記錄的網址裡
+        headers: { 'x-goog-api-key': apiKey },
+        payload: JSON.stringify(payload),
+        muteHttpExceptions: true,
+      });
     } catch (fetchErr) {
-      lastFetchError = fetchErr;
-      // 連線層級的錯誤（非 HTTP 狀態碼）也算暫時性，一樣重試
+      problems.push({
+        model: model,
+        code: 0,
+        message: '連線失敗：' + (fetchErr && fetchErr.message ? fetchErr.message : fetchErr),
+      });
+      continue;
     }
+
+    const code = res.getResponseCode();
+    const text = res.getContentText();
+
+    if (code < 200 || code >= 300) {
+      let apiMessage = '';
+      try {
+        const errJson = JSON.parse(text);
+        apiMessage = (errJson.error && errJson.error.message) || '';
+      } catch (ignored) {
+        // 回應不是 JSON 就用原始文字，截短避免訊息爆掉
+      }
+      problems.push({
+        model: model,
+        code: code,
+        message: apiMessage || text.slice(0, 200),
+      });
+      continue;
+    }
+
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch (parseErr) {
+      problems.push({ model: model, code: code, message: '回應不是合法 JSON' });
+      continue;
+    }
+
+    const candidate = json.candidates && json.candidates[0];
+    if (!candidate) {
+      problems.push({ model: model, code: code, message: '沒有回傳任何結果' });
+      continue;
+    }
+    if (candidate.finishReason && candidate.finishReason !== 'STOP') {
+      problems.push({
+        model: model,
+        code: code,
+        message: '回應不完整（finishReason=' + candidate.finishReason + '）',
+      });
+      continue;
+    }
+
+    const replyText = extractGeminiText_(json);
+    if (!replyText) {
+      problems.push({ model: model, code: code, message: '回傳空內容' });
+      continue;
+    }
+
+    return { text: replyText, model: model };
   }
-  return { fetchError: lastFetchError };
+
+  return { problems: problems };
+}
+
+/** 把每個模型的失敗原因組成一行，給錯誤訊息用 */
+function describeGeminiProblems_(problems) {
+  return problems
+    .map(function (p) {
+      return p.model + '（' + (p.code ? 'HTTP ' + p.code : '連線錯誤') + '）：' + p.message;
+    })
+    .join('；');
 }
 
 function handleRecognizePlace_(body) {
@@ -494,57 +581,47 @@ function handleRecognizePlace_(body) {
       ],
       generationConfig: {
         temperature: 0,
+        maxOutputTokens: RECOGNIZE_MAX_OUTPUT_TOKENS,
         responseMimeType: 'application/json',
       },
     };
 
-    const attempt = fetchGeminiWithRetry_(
-      GEMINI_API_URL + '?key=' + encodeURIComponent(apiKey),
-      {
-        method: 'post',
-        contentType: 'application/json',
-        payload: JSON.stringify(payload),
-        muteHttpExceptions: true,
-      },
-    );
-    if (!attempt.res) {
-      const fetchErr = attempt.fetchError;
+    const attempt = callGeminiWithFallback_(payload, apiKey);
+
+    if (!attempt.text) {
+      const problems = attempt.problems || [];
+      const allOverloaded =
+        problems.length > 0 &&
+        problems.every(function (p) {
+          return p.code === 503;
+        });
+      const anyQuota = problems.some(function (p) {
+        return p.code === 429;
+      });
+
+      if (allOverloaded) {
+        return jsonError_(
+          'Gemini 目前所有備援模型都過載中（' +
+            GEMINI_MODELS.length +
+            ' 個模型都回 HTTP 503），這通常是短暫的，請稍等一下再按一次「重新辨識」',
+        );
+      }
+      if (anyQuota) {
+        return jsonError_(
+          'Gemini API 額度已用完或請求過於頻繁（HTTP 429），請稍後再試，' +
+            '或到 Google AI Studio 檢查用量。各模型狀況：' +
+            describeGeminiProblems_(problems),
+        );
+      }
       return jsonError_(
-        '呼叫 Gemini API 失敗（已重試 ' +
-          RECOGNIZE_RETRY_DELAYS_MS.length +
-          ' 次）：' +
-          (fetchErr && fetchErr.message ? fetchErr.message : fetchErr),
+        '呼叫 Gemini API 失敗（已試過 ' +
+          GEMINI_MODELS.length +
+          ' 個模型）：' +
+          describeGeminiProblems_(problems),
       );
     }
-    const res = attempt.res;
 
-    const code = res.getResponseCode();
-    const text = res.getContentText();
-
-    if (code === 429) {
-      return jsonError_(
-        'Gemini API 額度已用完或請求過於頻繁（HTTP 429），請稍後再試，' +
-          '或到 Google AI Studio 檢查用量',
-      );
-    }
-    if (code < 200 || code >= 300) {
-      const retried = code === 503 ? '（已重試 ' + RECOGNIZE_RETRY_DELAYS_MS.length + ' 次）' : '';
-      return jsonError_(
-        'Gemini API 回應異常' + retried + '（HTTP ' + code + '）：' + text.slice(0, 300),
-      );
-    }
-
-    let geminiJson;
-    try {
-      geminiJson = JSON.parse(text);
-    } catch (parseErr) {
-      return jsonError_('Gemini API 回應不是合法 JSON');
-    }
-
-    const replyText = extractGeminiText_(geminiJson);
-    if (!replyText) return jsonError_('辨識失敗，請手動填寫');
-
-    const parsed = extractJsonObject_(replyText);
+    const parsed = extractJsonObject_(attempt.text);
     if (!parsed) return jsonError_('辨識失敗，請手動填寫');
 
     const latLng = sanitizeLatLng_(parsed.lat, parsed.lng);
@@ -562,7 +639,12 @@ function handleRecognizePlace_(body) {
   }
 }
 
-/** 從 Gemini generateContent 回應裡取出文字內容 */
+/**
+ * 從 Gemini generateContent 回應裡取出文字內容。
+ *
+ * 會跳過 thought 為 true 的 part：新的模型會把推理過程也放進 parts，
+ * 那段不是我們要的 JSON，混進來會讓後面的 JSON 解析直接失敗。
+ */
 function extractGeminiText_(geminiJson) {
   try {
     const candidates = geminiJson.candidates || [];
@@ -571,6 +653,7 @@ function extractGeminiText_(geminiJson) {
       if (parts && parts.length) {
         const t = parts
           .map(function (p) {
+            if (p.thought) return '';
             return p.text || '';
           })
           .join('');

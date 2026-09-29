@@ -211,7 +211,11 @@ export async function recognizePlace(
         mimeType,
       }),
     },
-    40000, // 後端遇到 503 會重試最多 3 次（見 gas/Code.gs），逾時要拉長一點
+    // 後端遇到 503 最多重試 3 次（見 gas/Code.gs 的 fetchGeminiWithRetry_），
+    // 每次都是真的打一次 Gemini 多模態請求，免費層過載時單次就可能要十幾秒；
+    // 40 秒撐不住「3 次都變慢」的最壞狀況，前端會在後端還在重試時就先判定逾時、
+    // 顯示「連線逾時」——即使後端其實快成功了。拉長到 90 秒，留給 3 次重試足夠時間。
+    90000,
   );
   const json = await parseJson<ApiResponse<RecognizedPlace>>(res);
   if (!json.success) throw new Error(json.message || '辨識失敗，請手動填寫');
