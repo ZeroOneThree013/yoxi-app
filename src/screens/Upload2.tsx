@@ -93,39 +93,41 @@ export default function Upload2() {
       <TopBar title="辨識截圖內容" back="/places/upload" wide="split" />
       <ScreenScroll wide="split">
         <div className="wide:grid wide:grid-cols-2 wide:items-start wide:gap-10">
-          {/* 用真正的 <img> 讓框跟著截圖本身的長寬比走，手機直式截圖／桌機寬版截圖都不會被裁切或跑出奇怪的留白 */}
-          <div className="relative mb-4 overflow-hidden rounded-2xl bg-paper-deep font-mono text-[12px] text-[#8C6410] wide:mb-0 wide:rounded-[28px]">
-            {state.imageDataUrl && (
-              <img
-                src={state.imageDataUrl}
-                alt=""
-                className="block max-h-[240px] w-full object-contain wide:max-h-[70vh]"
-              />
-            )}
-            {phase === 'processing' && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="flex flex-col items-center gap-2 rounded-xl bg-black/55 px-4 py-3 text-white">
-                  <div className="spinner" />
-                  AI 辨識截圖中…
+          <div>
+            {/* 用真正的 <img> 讓框跟著截圖本身的長寬比走，手機直式截圖／桌機寬版截圖都不會被裁切或跑出奇怪的留白 */}
+            <div className="relative mb-4 overflow-hidden rounded-2xl bg-paper-deep font-mono text-[12px] text-[#8C6410] wide:rounded-[28px]">
+              {state.imageDataUrl && (
+                <img
+                  src={state.imageDataUrl}
+                  alt=""
+                  className="block max-h-[420px] w-full object-contain wide:max-h-[80vh]"
+                />
+              )}
+              {phase === 'processing' && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="flex flex-col items-center gap-2 rounded-xl bg-black/55 px-4 py-3 text-white">
+                    <div className="spinner" />
+                    AI 辨識截圖中…
+                  </div>
                 </div>
-              </div>
-            )}
-            {phase === 'done' && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="rounded-xl bg-black/55 px-4 py-3 text-white">
-                  {recognizeError ? '辨識未完成，可手動填寫' : '截圖已辨識 ✓'}
+              )}
+              {phase === 'done' && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="rounded-xl bg-black/55 px-4 py-3 text-white">
+                    {recognizeError ? '辨識未完成，可手動填寫' : '截圖已辨識 ✓'}
+                  </div>
                 </div>
+              )}
+            </div>
+
+            {phase === 'idle' && (
+              <div className="rounded-2xl border-[1.5px] border-dashed border-line bg-card p-6 text-center text-[12.5px] leading-relaxed text-muted">
+                按下方「開始 AI 辨識」，AI 會讀取上方截圖並整理出可編輯的店名、地區與種類。
               </div>
             )}
           </div>
 
           <div>
-            {phase === 'idle' && (
-              <div className="hidden rounded-2xl border-[1.5px] border-dashed border-line bg-card p-6 text-center text-[12.5px] leading-relaxed text-muted wide:block">
-                按下方「開始 AI 辨識」，AI 會讀取左側截圖並整理出可編輯的店名、地區與種類。
-              </div>
-            )}
-
             {phase === 'done' && (
               <>
                 {recognizeError && (
