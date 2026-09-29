@@ -70,18 +70,23 @@ export default function TaskSelect() {
     [],
   );
   const [recNote, setRecNote] = useState<string | null>(null);
+  const [recError, setRecError] = useState<string | null>(null);
 
   const loadRecommendations = useCallback(async () => {
     setRecStatus('loading');
+    setRecError(null);
     try {
       const { category, isFallback } = pickPreferredCategory(places);
       const list = await fetchNearbyRecommendations(origin, category);
       setRecommendations(list);
       setRecNote(isFallback ? '還沒收藏足夠資料，暫時顯示熱門類型' : null);
       setRecStatus('ready');
-    } catch {
-      // 查詢失敗 / 逾時：清空清單、顯示乾淨的失敗狀態，不 fallback 回假地點
+    } catch (e) {
+      // 查詢失敗 / 逾時：清空清單、顯示乾淨的失敗狀態，不 fallback 回假地點。
+      // 一定要把錯誤訊息留下來顯示：後端會回「哪個鏡像、什麼原因」，
+      // 以前這裡寫成 catch {} 直接吞掉，線上出問題時完全查不出原因。
       setRecommendations([]);
+      setRecError(e instanceof Error ? e.message : '查詢失敗，請稍後再試');
       setRecStatus('error');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -183,7 +188,7 @@ export default function TaskSelect() {
             {seg === 'rec' && recStatus === 'error' && (
               <div className="mb-4 rounded-2xl border border-line bg-[#F9DED5] p-4 text-[12.5px] text-red-deep">
                 <p className="mb-3 leading-relaxed">
-                  推薦地點查詢失敗，請稍後再試。
+                  {recError ?? '推薦地點查詢失敗，請稍後再試。'}
                 </p>
                 <Button
                   variant="ghost"

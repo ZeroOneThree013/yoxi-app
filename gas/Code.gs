@@ -120,11 +120,33 @@ const NOMINATIM_USER_AGENT =
 // 如果哪天這幾個鏡像全部都不能用了，去
 // https://wiki.openstreetmap.org/wiki/Overpass_API#Public_Overpass_API_instances
 // 找目前還在維運的鏡像站，加進這個陣列即可，不用動下面的重試邏輯。
+// 依序嘗試的鏡像。注意：這些都是社群維運的免費服務，可用性會隨時間變動，
+// **清單順序需要定期用 testOverpassMirrors() 重新驗證**（見下方那個函式）。
 const OVERPASS_URLS = [
-  'https://overpass.kumi.systems/api/interpreter', // 已用測試函式驗證 GAS 連得上（回 200），排第一個
-  'https://overpass-api.de/api/interpreter', // 官方主站；目前擋 GAS 的出口 IP，當備援保留，也許之後解除限制
-  'https://overpass.openstreetmap.ru/api/interpreter', // 另一個社群維運的公開鏡像，當第三順位備援
+  'https://overpass.nchc.org.tw/api/interpreter', // 台灣國網中心；地理位置最近，對台灣查詢最合適
+  'https://overpass.kumi.systems/api/interpreter', // 社群大站，容量大但也常被打爆
+  'https://overpass-api.de/api/interpreter', // 官方主站，最常壅塞，放最後當備援
 ];
+
+// testOverpassMirrors() 會「額外」一起測的候選鏡像。
+// 想換鏡像時，先跑 testOverpassMirrors() 看哪個在 GAS 端又快又有台灣資料，
+// 再把它移進上面的 OVERPASS_URLS。
+//
+// 選鏡像的兩個陷阱（實測踩過）：
+//   1. 有些是「單一國家」的區域性實例，例如 overpass.osm.ch 只收錄瑞士資料：
+//      查台北會回 HTTP 200 但 0 筆，看起來正常其實完全不能用。
+//   2. 從瀏覽器測會被 CORS 擋（看起來像掛了），但 GAS 沒有 CORS 限制可能完全正常，
+//      所以一定要用 testOverpassMirrors() 從 GAS 端測，不要只在瀏覽器試。
+const OVERPASS_CANDIDATE_URLS = [
+  'https://overpass.osm.jp/api/interpreter',
+  'https://overpass.openstreetmap.ru/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+];
+
+// 查詢總時間預算（毫秒）。GAS 的 UrlFetchApp 沒有逾時參數，沒辦法叫單一鏡像
+// 「幾秒內一定要回」；能做的是跑完一個鏡像後檢查已用時間，超過就不再試下一個。
+// 實測過三個鏡像全掛時串聯要 137 秒，遠超過前端逾時，使用者只是白等。
+const OVERPASS_TIME_BUDGET_MS = 40000;
 const OVERPASS_RADIUS_M = 4000; // 3-5 公里，取中間值
 const OVERPASS_USER_AGENT =
   'yoxi-app/1.0 (hackathon demo; https://github.com/ZeroOneThree013/yoxi-app)';
@@ -784,24 +806,43 @@ function fetchOverpassData_(query) {
     muteHttpExceptions: true,
   };
 
+  const startedAt = Date.now();
+  const problems = [];
+
   for (let i = 0; i < OVERPASS_URLS.length; i++) {
     const url = OVERPASS_URLS[i];
+
+    // 時間預算：UrlFetchApp 沒有逾時參數（GAS 限制），單一鏡像卡住就是卡住，
+    // 但至少不要讓「一個一個慢慢卡」累加成好幾分鐘。實測過三個鏡像全部不可用時
+    // 串聯下來要 137 秒，前端早就逾時了，使用者只會看到一個沒有資訊的失敗訊息。
+    // 跑完一個鏡像就檢查一次已用時間，超過預算就不再試下一個，直接回失敗。
+    const elapsed = Date.now() - startedAt;
+    if (i > 0 && elapsed > OVERPASS_TIME_BUDGET_MS) {
+      Logger.log(
+        '已用 ' + elapsed + 'ms 超過預算，放棄剩下 ' +
+          (OVERPASS_URLS.length - i) + ' 個鏡像',
+      );
+      problems.push('（已達時間預算，未再嘗試剩下的鏡像）');
+      break;
+    }
+
+    const attemptAt = Date.now();
     let res;
     try {
       res = UrlFetchApp.fetch(url, options);
     } catch (fetchErr) {
-      Logger.log(
-        'Overpass 鏡像連線失敗（' +
-          url +
-          '）：' +
-          (fetchErr && fetchErr.message ? fetchErr.message : fetchErr),
-      );
+      const ms = Date.now() - attemptAt;
+      Logger.log('Overpass 鏡像連線失敗（' + url + '，' + ms + 'ms）：' +
+        (fetchErr && fetchErr.message ? fetchErr.message : fetchErr));
+      problems.push(shortMirrorName_(url) + ' 連線失敗');
       continue;
     }
 
+    const ms = Date.now() - attemptAt;
     const code = res.getResponseCode();
     if (code !== 200) {
-      Logger.log('Overpass 鏡像回應異常（' + url + '）：HTTP ' + code);
+      Logger.log('Overpass 鏡像回應異常（' + url + '，' + ms + 'ms）：HTTP ' + code);
+      problems.push(shortMirrorName_(url) + ' HTTP ' + code);
       continue;
     }
 
@@ -809,20 +850,77 @@ function fetchOverpassData_(query) {
     try {
       data = JSON.parse(res.getContentText());
     } catch (parseErr) {
-      Logger.log('Overpass 鏡像回應不是合法 JSON（' + url + '）');
+      Logger.log('Overpass 鏡像回應不是合法 JSON（' + url + '，' + ms + 'ms）');
+      problems.push(shortMirrorName_(url) + ' 回應不是 JSON');
       continue;
     }
 
     if (!data || !Array.isArray(data.elements)) {
       Logger.log('Overpass 鏡像回應格式不對，缺少 elements（' + url + '）');
+      problems.push(shortMirrorName_(url) + ' 回應格式不對');
       continue;
     }
 
-    Logger.log('Overpass 查詢成功，使用鏡像：' + url);
-    return data;
+    Logger.log('Overpass 查詢成功，使用鏡像：' + url + '（' + ms + 'ms）');
+    return { data: data };
   }
 
-  return null; // 全部鏡像都失敗
+  return { problems: problems }; // 全部鏡像都失敗（或提前用完時間預算）
+}
+
+/** 把鏡像網址縮成好讀的名字，用在回給前端的錯誤訊息裡 */
+function shortMirrorName_(url) {
+  const m = /^https?:\/\/([^/]+)/.exec(url);
+  return m ? m[1] : url;
+}
+
+/**
+ * 手動測試用：在 Apps Script 編輯器選這個函式按 Run，看 Executions 的 log，
+ * 就能知道「從 GAS 出去」實際連得到哪些 Overpass 鏡像、各花多久。
+ *
+ * 為什麼需要這個：從瀏覽器測不準。部分鏡像（例如台灣國網 overpass.nchc.org.tw）
+ * 會被瀏覽器的 CORS 擋掉而看起來「失敗」，但 GAS 沒有 CORS 限制，可能完全可用；
+ * 反過來也有鏡像擋 GAS 的出口 IP。要換 OVERPASS_URLS 的順序前先跑這個。
+ */
+function testOverpassMirrors() {
+  const candidates = OVERPASS_URLS.concat(OVERPASS_CANDIDATE_URLS);
+  // 很小的查詢，只為了測連線，不是真的要資料
+  const query =
+    '[out:json][timeout:10];node["amenity"="cafe"](around:800,25.0438,121.5346);out 3;';
+  const options = {
+    method: 'post',
+    contentType: 'application/x-www-form-urlencoded',
+    headers: { 'User-Agent': OVERPASS_USER_AGENT },
+    payload: 'data=' + encodeURIComponent(query),
+    muteHttpExceptions: true,
+  };
+
+  for (let i = 0; i < candidates.length; i++) {
+    const url = candidates[i];
+    const t0 = Date.now();
+    try {
+      const res = UrlFetchApp.fetch(url, options);
+      const ms = Date.now() - t0;
+      let count = -1;
+      try {
+        const parsed = JSON.parse(res.getContentText());
+        count = (parsed.elements || []).length;
+      } catch (e) {
+        // 不是 JSON，count 維持 -1
+      }
+      Logger.log(
+        url + ' → HTTP ' + res.getResponseCode() + '，' + ms + 'ms，' +
+          (count >= 0 ? '台北 800m 內查到 ' + count + ' 筆' : '回應不是 JSON'),
+      );
+    } catch (err) {
+      Logger.log(url + ' → 連線失敗（' + (Date.now() - t0) + 'ms）：' +
+        (err && err.message ? err.message : err));
+    }
+  }
+  Logger.log(
+    '提示：挑「HTTP 200 + 有查到筆數 + 秒數短」的鏡像放進 OVERPASS_URLS 最前面。' +
+      '查到 0 筆代表那個鏡像沒有台灣資料（例如只收錄單一國家的區域性實例），不能用。',
+  );
 }
 
 function handleRecommendPlaces_(body) {
@@ -837,12 +935,19 @@ function handleRecommendPlaces_(body) {
     const tag = categoryToOsmTag_(category);
     const query = buildOverpassQuery_(tag, lat, lng);
 
-    const data = fetchOverpassData_(query);
-    if (!data) {
-      return jsonError_('所有地圖資料來源都連線失敗，請稍後再試');
+    const result = fetchOverpassData_(query);
+    if (!result.data) {
+      // 把每個鏡像各自的失敗原因帶回前端：以前只回一句籠統的「都連線失敗」，
+      // 線上出問題時完全看不出是哪個鏡像、什麼原因，只能猜。
+      const detail = (result.problems || []).join('、');
+      return jsonError_(
+        '附近地點查詢失敗：地圖資料來源（Overpass）目前都連不上' +
+          (detail ? '（' + detail + '）' : '') +
+          '。這是免費公共服務的暫時性壅塞，請稍後再試',
+      );
     }
 
-    const elements = data.elements || [];
+    const elements = result.data.elements || [];
     const pois = [];
     for (let i = 0; i < elements.length; i++) {
       const el = elements[i];

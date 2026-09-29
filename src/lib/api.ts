@@ -250,11 +250,14 @@ export async function fetchNearbyPois(
         category,
       }),
     },
-    // 後端最多依序試 3 個 Overpass 鏡像（見 gas/Code.gs 的 OVERPASS_URLS /
-    // fetchOverpassData_），單一鏡像實測過慢到 26 秒，最壞情況全部試一輪
-    // 可能要 45-60 秒。20 秒太短，前端會在後端還在查的時候就先判定逾時、
-    // 顯示查詢失敗——拉長到 65 秒，留一點超過 60 秒估計值的緩衝。
-    65000,
+    // 後端依序試多個 Overpass 鏡像，並有 OVERPASS_TIME_BUDGET_MS（目前 40 秒）
+    // 的總時間預算，超過就不再試剩下的鏡像、直接回失敗（見 gas/Code.gs 的
+    // fetchOverpassData_）。這裡抓 40 秒預算 + GAS 自身開銷與網路來回的緩衝。
+    //
+    // 不要再往上加：實測過後端三個鏡像全掛時會跑到 137 秒才回應，前端無論設
+    // 65 秒還是 120 秒都一樣會逾時，差別只在使用者要空等多久。真正的解法是
+    // 後端快速失敗（時間預算）+ 把失敗原因帶回來顯示，不是讓前端等更久。
+    55000,
   );
   const json = await parseJson<ApiResponse<NearbyPoi[]>>(res);
   if (!json.success) throw new Error(json.message || '查詢附近推薦地點失敗');
